@@ -58,4 +58,76 @@ test('applyHostCommandToState updates colour, safety modes, cue stack reorder/du
   });
   assert.equal(duped.show.cues.length, reordered.show.cues.length + 1);
   assert.match(duped.show.cues[duped.show.cues.length - 1].name, /\(Copy\)$/);
+
+  // 5. Upsert beat_flash cue preserves full effectParams & cue_go activates them
+  const upserted = applyHostCommandToState({
+    show: duped.show,
+    devices: [],
+    mediaAssets: [],
+    action: 'upsert_cue',
+    payload: {
+      cue: {
+        id: 'cue-beat-custom',
+        cueNumber: duped.show.cues.length + 1,
+        name: 'Drop Beat Cue',
+        colour: '#FF0066',
+        effectType: 'beat_flash',
+        effectParams: {
+          bpm: 138,
+          beatSteps: 8,
+          beatStepPattern: [true, false, false, true, false, false, true, false],
+          beatFlashEvery: 3,
+          beatSpreadMode: 'chase',
+          width: 64,
+          spread: 72,
+          palette: ['#FF0066', '#00FFFF'],
+        },
+        fadeInMs: 250,
+        holdMs: 3000,
+        fadeOutMs: 250,
+        delayMs: 100,
+        easing: 'easeInOut',
+        targetGroupId: 'all',
+        targetDeviceIds: [],
+        intensity: 95,
+        autoFollow: true,
+        notes: 'Test beat cue',
+      },
+    },
+    nowMs: 3500,
+  });
+  const beatCueIndex = upserted.show.cues.findIndex((c) => c.id === 'cue-beat-custom');
+  assert.ok(beatCueIndex >= 0, 'Custom beat cue should be added to stack');
+  assert.equal(upserted.show.cues[beatCueIndex].effectParams?.bpm, 138);
+  assert.equal(upserted.show.cues[beatCueIndex].effectParams?.beatSpreadMode, 'chase');
+
+  const beatGo = applyHostCommandToState({
+    show: upserted.show,
+    devices: [],
+    mediaAssets: [],
+    action: 'cue_go',
+    payload: { cueIndex: beatCueIndex },
+    nowMs: 4000,
+  });
+  assert.equal(beatGo.show.lighting.layers[0]?.type, 'beat_flash');
+  assert.equal(beatGo.show.lighting.layers[0]?.params.bpm, 138);
+  assert.equal(beatGo.show.lighting.layers[0]?.params.spread, 72);
+  assert.equal(beatGo.show.lighting.layers[0]?.params.width, 64);
+
+  // 6. Delete active cue removes it, renumbers 1..N, and resets active cue state cleanly
+  const beforeLen = beatGo.show.cues.length;
+  const deletedActive = applyHostCommandToState({
+    show: beatGo.show,
+    devices: [],
+    mediaAssets: [],
+    action: 'delete_cue',
+    payload: { cueId: 'cue-beat-custom' },
+    nowMs: 4500,
+  });
+  assert.equal(deletedActive.show.cues.length, beforeLen - 1);
+  assert.ok(deletedActive.show.cues.every((c, idx) => c.cueNumber === idx + 1));
+  assert.equal(deletedActive.show.cues.some((c) => c.id === 'cue-beat-custom'), false);
+  assert.equal(deletedActive.show.playback.activeCueId, null);
+  assert.equal(deletedActive.show.playback.activeCueIndex, -1);
 });
+

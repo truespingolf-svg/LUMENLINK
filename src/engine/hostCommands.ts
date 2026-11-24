@@ -73,6 +73,7 @@ export function activateCueAtIndex(
     params: createDefaultEffectParams({
       ...cue.effectParams,
       intensity: cue.intensity,
+      delayMs: cue.effectParams?.delayMs ?? cue.delayMs ?? 0,
       targetGroupId: cue.targetGroupId,
       palette,
     }),
@@ -642,6 +643,9 @@ export function applyHostCommandToState(params: {
     case 'delete_cue': {
       const cueId = String(payload.cueId || '');
       show.cues = show.cues.filter((c) => c.id !== cueId);
+      show.cues.forEach((c, idx) => {
+        c.cueNumber = idx + 1;
+      });
       if (show.playback.activeCueId === cueId) {
         show.playback.activeCueId = null;
         show.playback.activeCueIndex = -1;

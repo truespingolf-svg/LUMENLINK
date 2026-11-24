@@ -78,17 +78,22 @@ export const LiveVisualiser: React.FC<LiveVisualiserProps> = ({
     .map((l) => EFFECT_CATALOG.find((fx) => fx.type === l.type)?.label || l.name || l.type)
     .join(' + ');
 
-  // Always compute live stage output across 12 spatial zones so colour/effects/fades
-  // reflect instantaneously on the console even when 0 phones are currently connected.
-  const stageZoneOutputs = useMemo(
-    () =>
-      VIRTUAL_STAGE_FIXTURES.map((vf) =>
-        renderFixtureOutput(vf, VIRTUAL_STAGE_FIXTURES, groups, lighting, tickMs),
-      ),
-    [groups, lighting, tickMs],
-  );
+  // Map the 12 stage zones across the show's actual fixture groups so both MASTER
+  // and any Group Master fader (e.g. Floor Pit, Left Wing) reflect live immediately.
+  const stageZoneOutputs = useMemo(() => {
+    const groupIds = groups.length > 0 ? groups.map((g) => g.id) : ['grp-all'];
+    const zones = VIRTUAL_STAGE_FIXTURES.map((vf, idx) => ({
+      ...vf,
+      groupId: groupIds[Math.min(groupIds.length - 1, Math.floor((idx * groupIds.length) / 12))],
+    }));
+    return zones.map((vf) =>
+      renderFixtureOutput(vf, zones, groups, lighting, tickMs),
+    );
+  }, [groups, lighting, tickMs]);
 
-  const centerOutput = stageZoneOutputs[Math.floor(stageZoneOutputs.length / 2)];
+  const centerOutput =
+    stageZoneOutputs.find((o) => o.intensity > 0) ||
+    stageZoneOutputs[Math.floor(stageZoneOutputs.length / 2)];
   const statusTag = lighting.blackout
     ? 'BLACKOUT'
     : lighting.emergencyNeutral

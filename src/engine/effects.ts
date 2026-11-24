@@ -82,6 +82,7 @@ export const EFFECT_CATALOG: EffectCatalogEntry[] = [
   { type: 'flash_right_to_left', label: 'Right-to-Left Flash', category: 'flash', description: 'Sweeping strobe bar from right to left.', defaultPalette: ['#FFFFFF', '#000000'] },
   { type: 'flash_centre_out', label: 'Centre-Out Flash', category: 'flash', description: 'Shockwave flash expanding from stage centre.', defaultPalette: ['#FF9900', '#000000'] },
   { type: 'flash_staggered', label: 'Staggered Flash', category: 'flash', description: 'Phase-offset staggered rhythmic hits.', defaultPalette: ['#00E5FF', '#000000'] },
+  { type: 'beat_flash', label: 'Beat Step Flash', category: 'flash', description: 'BPM beat sequencer — choose exact steps to flash & spread across devices.', defaultPalette: ['#FFFFFF', '#000000'] },
 
   // Advanced Effects (Primary = Hero Colour, Secondary = Dark Base / Trough)
   { type: 'fire_simulation', label: 'Fire Simulation', category: 'advanced', description: 'Warm flickering embers rising from bottom to top.', defaultPalette: ['#FF6B00', '#2B0400', '#FFD166'] },
@@ -124,6 +125,11 @@ export function createDefaultEffectParams(overrides?: Partial<EffectParameters>)
     audioLevel: 0.65,
     customHueShift: 210,
     customPulseShape: 'sine',
+    bpm: 120,
+    beatSteps: 8,
+    beatStepPattern: [true, false, true, false, true, false, true, false],
+    beatFlashEvery: 2,
+    beatSpreadMode: 'all',
     ...overrides,
   };
 }
@@ -239,10 +245,11 @@ export function evaluateEffectLayer(
 
   const x = clamp(device.x, 0, 1);
   const y = clamp(device.y, 0, 1);
-  const widthNorm = clamp((p.width || 30) / 100, 0.05, 1);
-  const sizeNorm = clamp((p.size || 25) / 100, 0.05, 1);
-  const spreadFactor = clamp((p.spread || 50) / 50, 0.1, 3);
-  const densityFactor = clamp((p.density || 40) / 100, 0.05, 1);
+  const widthNorm = clamp((p.width ?? 30) / 100, 0.05, 1);
+  const sizeNorm = clamp((p.size ?? 25) / 100, 0.05, 1);
+  const spreadFactor = clamp((p.spread ?? 50) / 50, 0.1, 3);
+  const densityFactor = clamp((p.density ?? 40) / 100, 0.05, 1);
+  const freqFactor = clamp((p.frequency ?? 2) / 2, 0.1, 10);
   const palette = p.palette && p.palette.length > 0 ? p.palette : ['#0088FF', '#FF2266'];
   const primary = hexToRgb(palette[0]);
   const secondary = hexToRgb(palette[1] || palette[0]);
@@ -260,6 +267,36 @@ export function evaluateEffectLayer(
   const foundIdx = pool.findIndex((d) => d.id === device.id);
   const orderedIdx = foundIdx >= 0 ? foundIdx : Math.max(0, allDevices.findIndex((d) => d.id === device.id));
 
+  const deviceSpan = activeCount > 1 ? orderedIdx / (activeCount - 1) : x;
+  let minX = 1;
+  let maxX = 0;
+  let minY = 1;
+  let maxY = 0;
+  if (activeCount > 1) {
+    for (const d of pool) {
+      if (d.x < minX) minX = d.x;
+      if (d.x > maxX) maxX = d.x;
+      if (d.y < minY) minY = d.y;
+      if (d.y > maxY) maxY = d.y;
+    }
+  }
+  const normX =
+    activeCount > 1
+      ? maxX - minX > 0.08
+        ? clamp((x - minX) / (maxX - minX), 0, 1)
+        : deviceSpan
+      : x;
+  const normY =
+    activeCount > 1 && maxY - minY > 0.08
+      ? clamp((y - minY) / (maxY - minY), 0, 1)
+      : y;
+
+  // Spread-adjusted coordinates & combined wave breadth (Width + Size + Spread + Density)
+  const spreadX = clamp((normX - 0.5) * spreadFactor + 0.5, 0, 1);
+  const spreadY = clamp((normY - 0.5) * spreadFactor + 0.5, 0, 1);
+  const combinedBandWidth = clamp(widthNorm * 0.34 + sizeNorm * 0.22, 0.04, 0.72);
+  const waveCrests = densityFactor > 0.55 ? 1 + Math.floor((densityFactor - 0.5) * 4) : 1;
+
   let outRgb: RGB = primary;
   let weight = 1;
   let flashActive = false;
@@ -270,77 +307,84 @@ export function evaluateEffectLayer(
       break;
     }
     case 'colour_fade': {
+      const fPhase = rawPhase * (0.6 + 0.4 * freqFactor);
       if (p.direction === 'pingpong') {
-        const k = applyDirectionPhase(rawPhase, 'pingpong');
+        const k = applyDirectionPhase(fPhase, 'pingpong');
         outRgb = samplePalette(palette, k);
       } else {
-        const k = applyDirectionPhase(rawPhase, p.direction);
+        const k = applyDirectionPhase(fPhase, p.direction);
         outRgb = samplePaletteLoop(palette, k);
       }
       break;
     }
     case 'rainbow_cycle': {
+      const rPhase = rawPhase * (0.6 + 0.4 * freqFactor);
       if (palette.length >= 2 && !isDefaultRainbowPalette(palette)) {
         if (p.direction === 'pingpong') {
-          outRgb = samplePalette(palette, applyDirectionPhase(rawPhase, 'pingpong'));
+          outRgb = samplePalette(palette, applyDirectionPhase(rPhase, 'pingpong'));
         } else {
-          outRgb = samplePaletteLoop(palette, applyDirectionPhase(rawPhase, p.direction));
+          outRgb = samplePaletteLoop(palette, applyDirectionPhase(rPhase, p.direction));
         }
       } else if (palette.length === 1 && !isDefaultRainbowPalette(palette)) {
         const baseHsv = rgbToHsv(primary.r, primary.g, primary.b);
-        const hue = ((baseHsv.h + applyDirectionPhase(rawPhase, p.direction) * 360) % 360 + 360) % 360;
+        const hue = ((baseHsv.h + applyDirectionPhase(rPhase, p.direction) * 360) % 360 + 360) % 360;
         outRgb = hsvToRgb(hue, Math.max(40, baseHsv.s), Math.max(50, baseHsv.v));
       } else {
-        const hue = ((applyDirectionPhase(rawPhase, p.direction) * 360) % 360 + 360) % 360;
+        const hue = ((applyDirectionPhase(rPhase, p.direction) * 360) % 360 + 360) % 360;
         outRgb = hsvToRgb(hue, 100, 100);
       }
       break;
     }
     case 'rainbow_wave': {
-      const wavePhase = applyDirectionPhase(rawPhase, p.direction);
+      const wavePhase = applyDirectionPhase(rawPhase * (0.6 + 0.4 * freqFactor), p.direction);
+      const spatialScale = spreadFactor * (0.5 + sizeNorm * 1.4);
       if (palette.length >= 2 && !isDefaultRainbowPalette(palette)) {
-        const pos = (((x * spreadFactor - wavePhase) % 1) + 1) % 1;
+        const pos = (((normX * spatialScale - wavePhase) % 1) + 1) % 1;
         outRgb = samplePaletteLoop(palette, pos);
       } else {
-        const hue = (((x * spreadFactor - wavePhase) * 360) % 360 + 360) % 360;
+        const hue = (((normX * spatialScale - wavePhase) * 360) % 360 + 360) % 360;
         outRgb = hsvToRgb(hue, 100, 100);
       }
       break;
     }
     case 'two_colour_gradient': {
+      const scaledX = clamp((normX - 0.5) * spreadFactor * (0.65 + sizeNorm * 0.7) + 0.5, 0, 1);
       const pos =
         activeCount === 1 || p.direction === 'pingpong'
-          ? applyDirectionPhase(x + rawPhase * 0.45, 'pingpong')
+          ? applyDirectionPhase(scaledX + rawPhase * 0.45, 'pingpong')
           : p.direction === 'reverse'
-            ? 1 - x
-            : x;
+            ? 1 - scaledX
+            : scaledX;
       outRgb = lerpRgb(primary, secondary, pos);
       break;
     }
     case 'multi_colour_gradient': {
+      const scaledX = clamp((normX - 0.5) * spreadFactor * (0.7 + sizeNorm * 0.65) + 0.5, 0, 1);
       if (activeCount === 1) {
-        const pos = applyDirectionPhase(x + rawPhase * 0.4, p.direction);
+        const pos = applyDirectionPhase(scaledX + rawPhase * 0.4, p.direction);
         outRgb = p.direction === 'pingpong' ? samplePalette(palette, pos) : samplePaletteLoop(palette, pos);
       } else {
-        const rawPos = clamp(x * spreadFactor, 0, 1);
-        const gradPos = p.direction === 'reverse' ? 1 - rawPos : rawPos;
+        const gradPos = p.direction === 'reverse' ? 1 - scaledX : scaledX;
         outRgb = samplePalette(palette, gradPos);
       }
       break;
     }
     case 'random_colour': {
-      const { step, prevStep, mix } = computeSteppedFade(tSec, Math.max(0.5, p.frequency), p.fadeTimeMs);
+      const { step, prevStep, mix } = computeSteppedFade(tSec + phaseOffset, Math.max(0.5, p.frequency), p.fadeTimeMs);
       const evalStep = (s: number): RGB => {
-        const h = hashFloat(device.fixtureNumber * 31 + s * 17);
+        const seedIdx = spreadFactor < 0.35 ? 1 : device.fixtureNumber;
+        const h = hashFloat(seedIdx * 31 + s * 17);
         return palette.length > 1 ? samplePalette(palette, h) : hsvToRgb(h * 360, 95, 100);
       };
       outRgb = mix < 1 ? lerpRgb(evalStep(prevStep), evalStep(step), mix) : evalStep(step);
       break;
     }
     case 'colour_chase': {
-      const { step, prevStep, mix } = computeSteppedFade(tSec, Math.max(0.5, p.frequency), p.fadeTimeMs);
+      const { step, prevStep, mix } = computeSteppedFade(tSec + phaseOffset, Math.max(0.5, p.frequency), p.fadeTimeMs);
+      const blockSize = Math.max(1, Math.round(sizeNorm * 2.5));
+      const chaseOffset = Math.round((orderedIdx * spreadFactor) / blockSize);
       const evalStep = (s: number): RGB => {
-        const idx = (orderedIdx + (p.direction === 'reverse' ? -s : s)) % palette.length;
+        const idx = (chaseOffset + (p.direction === 'reverse' ? -s : s)) % palette.length;
         const safeIdx = ((idx % palette.length) + palette.length) % palette.length;
         return hexToRgb(palette[safeIdx]);
       };
@@ -348,22 +392,24 @@ export function evaluateEffectLayer(
       break;
     }
     case 'colour_strobe': {
-      const cyc = (tSec * Math.max(1, p.frequency)) % 1;
-      const duty = clamp(densityFactor * 0.45, 0.08, 0.5);
+      const cyc = (tSec * Math.max(1, p.frequency) + phaseOffset) % 1;
+      const duty = clamp(densityFactor * 0.35 + widthNorm * 0.2, 0.06, 0.65);
       flashActive = cyc < duty;
       outRgb = flashActive ? primary : hasVisibleSecondary ? secondary : { r: 0, g: 0, b: 0 };
       weight = flashActive ? 1 : hasVisibleSecondary ? 1 : 0;
       break;
     }
     case 'colour_pulse': {
-      const cyc = (tSec * Math.max(0.25, p.frequency * 0.5)) % 1;
-      const env = Math.pow(Math.sin(cyc * Math.PI), 2);
+      const cyc = ((tSec * Math.max(0.25, p.frequency * 0.5) + phaseOffset + normX * (spreadFactor - 1) * 0.35) % 1 + 1) % 1;
+      const shapePow = clamp(2.4 - widthNorm * 1.5, 0.5, 3);
+      const env = Math.pow(Math.sin(cyc * Math.PI), shapePow);
       outRgb = samplePaletteLoop(palette, rawPhase * 0.35);
       weight = 0.06 + 0.94 * env;
       break;
     }
     case 'colour_breathing': {
-      const env = (Math.sin(rawPhase * Math.PI * 2 - Math.PI / 2) + 1) / 2;
+      const phaseTerm = rawPhase * (0.6 + 0.4 * freqFactor) + normX * (spreadFactor - 1) * 0.3;
+      const env = (Math.sin(phaseTerm * Math.PI * 2 - Math.PI / 2) + 1) / 2;
       if (hasSecondary) {
         outRgb = lerpRgb(secondary, primary, env);
         weight = 1;
@@ -380,8 +426,8 @@ export function evaluateEffectLayer(
       const toColor = hexToRgb(palette[(cycle + 1) % palette.length]);
       const isRev = p.direction === 'reverse' || (p.direction === 'pingpong' && cycle % 2 === 1);
       const head = isRev ? 1 - frac : frac;
-      const feather = Math.max(0.06, widthNorm * 0.35);
-      const dist = isRev ? head - x : x - head;
+      const feather = Math.max(0.05, widthNorm * 0.35 + sizeNorm * 0.15);
+      const dist = isRev ? head - spreadX : spreadX - head;
       if (dist <= 0) {
         outRgb = toColor;
       } else if (dist < feather) {
@@ -415,10 +461,11 @@ export function evaluateEffectLayer(
               ? 'pingpong'
               : 'reverse'
           : p.direction;
-      const head = applyDirectionPhase(rawPhase, dir);
-      const rawDist = Math.abs(x - head);
+      const head = applyDirectionPhase(rawPhase * (0.7 + 0.3 * freqFactor), dir);
+      const coord = ((spreadX * waveCrests) % 1 + 1) % 1;
+      const rawDist = Math.abs(coord - head);
       const wrapDist = p.direction === 'pingpong' ? rawDist : Math.min(rawDist, 1 - rawDist);
-      const band = gaussianBand(wrapDist, widthNorm * 0.45);
+      const band = gaussianBand(wrapDist, combinedBandWidth);
       outRgb = sampleWaveColor(palette, primary, secondary, band);
       weight = hasSecondary ? 1 : band;
       break;
@@ -433,27 +480,33 @@ export function evaluateEffectLayer(
               ? 'pingpong'
               : 'reverse'
           : p.direction;
-      const head = applyDirectionPhase(rawPhase, dir);
-      const rawDist = Math.abs(y - head);
+      const head = applyDirectionPhase(rawPhase * (0.7 + 0.3 * freqFactor), dir);
+      const coord = ((spreadY * waveCrests) % 1 + 1) % 1;
+      const rawDist = Math.abs(coord - head);
       const wrapDist = p.direction === 'pingpong' ? rawDist : Math.min(rawDist, 1 - rawDist);
-      const band = gaussianBand(wrapDist, widthNorm * 0.45);
+      const band = gaussianBand(wrapDist, combinedBandWidth);
       outRgb = sampleWaveColor(palette, primary, secondary, band);
       weight = hasSecondary ? 1 : band;
       break;
     }
     case 'wave_circular': {
-      const angle = Math.atan2(y - 0.5, x - 0.5) / (Math.PI * 2) + 0.5;
-      const head = applyDirectionPhase(rawPhase, p.direction);
-      const diff = Math.abs(angle - head);
+      const angle = Math.atan2(normY - 0.5, normX - 0.5) / (Math.PI * 2) + 0.5;
+      const head = applyDirectionPhase(rawPhase * (0.7 + 0.3 * freqFactor), p.direction);
+      const armCoord = ((angle * Math.max(1, Math.round(spreadFactor)) * waveCrests) % 1 + 1) % 1;
+      const diff = Math.abs(armCoord - head);
       const wrap = Math.min(diff, 1 - diff);
-      const band = gaussianBand(wrap, widthNorm * 0.4);
+      const band = gaussianBand(wrap, combinedBandWidth * 0.9);
       outRgb = sampleWaveColor(palette, primary, secondary, band);
       weight = hasSecondary ? 1 : 0.2 + 0.8 * band;
       break;
     }
     case 'wave_centre_out':
     case 'wave_outside_in': {
-      const distFromCentre = Math.hypot(x - 0.5, y - 0.5) / Math.SQRT1_2;
+      const distFromCentre = clamp(
+        (Math.hypot(normX - 0.5, normY - 0.5) / Math.SQRT1_2) * spreadFactor,
+        0,
+        1,
+      );
       const dir =
         layer.type === 'wave_outside_in'
           ? p.direction === 'reverse'
@@ -462,48 +515,49 @@ export function evaluateEffectLayer(
               ? 'pingpong'
               : 'reverse'
           : p.direction;
-      const head = applyDirectionPhase(rawPhase, dir);
-      const diff = Math.abs(distFromCentre - head);
+      const head = applyDirectionPhase(rawPhase * (0.7 + 0.3 * freqFactor), dir);
+      const coord = ((distFromCentre * waveCrests) % 1 + 1) % 1;
+      const diff = Math.abs(coord - head);
       const wrap = p.direction === 'pingpong' ? diff : Math.min(diff, 1 - diff);
-      const band = gaussianBand(wrap, widthNorm * 0.45);
+      const band = gaussianBand(wrap, combinedBandWidth);
       outRgb = sampleWaveColor(palette, primary, secondary, band);
       weight = hasSecondary ? 1 : 0.2 + 0.8 * band;
       break;
     }
     case 'wave_diagonal': {
-      const diag = (x + y) / 2;
-      const head = applyDirectionPhase(rawPhase, p.direction);
+      const diag = (((spreadX + spreadY) / 2) * waveCrests) % 1;
+      const head = applyDirectionPhase(rawPhase * (0.7 + 0.3 * freqFactor), p.direction);
       const diff = Math.abs(diag - head);
       const wrap = p.direction === 'pingpong' ? diff : Math.min(diff, 1 - diff);
-      const band = gaussianBand(wrap, widthNorm * 0.45);
+      const band = gaussianBand(wrap, combinedBandWidth);
       outRgb = sampleWaveColor(palette, primary, secondary, band);
       weight = hasSecondary ? 1 : 0.2 + 0.8 * band;
       break;
     }
     case 'alternating_rows': {
-      const { step, prevStep, mix } = computeSteppedFade(tSec, Math.max(0.5, p.frequency), p.fadeTimeMs);
+      const { step, prevStep, mix } = computeSteppedFade(tSec + phaseOffset, Math.max(0.5, p.frequency), p.fadeTimeMs);
+      const rowStride = Math.max(1, Math.round(sizeNorm * 2));
       const evalStep = (s: number) => {
         const flip = s % 2;
-        const isActive = activeCount === 1 ? flip === 0 : device.row % 2 === flip;
-        const rgb = isActive ? primary : hasSecondary ? secondary : scaleRgb(primary, 0.08);
-        return rgb;
+        const isActive = activeCount === 1 ? flip === 0 : Math.floor(device.row / rowStride) % 2 === flip;
+        return isActive ? primary : hasSecondary ? secondary : scaleRgb(primary, 0.08);
       };
       outRgb = mix < 1 ? lerpRgb(evalStep(prevStep), evalStep(step), mix) : evalStep(step);
       break;
     }
     case 'alternating_columns': {
-      const { step, prevStep, mix } = computeSteppedFade(tSec, Math.max(0.5, p.frequency), p.fadeTimeMs);
+      const { step, prevStep, mix } = computeSteppedFade(tSec + phaseOffset, Math.max(0.5, p.frequency), p.fadeTimeMs);
+      const colStride = Math.max(1, Math.round(sizeNorm * 2));
       const evalStep = (s: number) => {
         const flip = s % 2;
-        const isActive = activeCount === 1 ? flip === 0 : device.col % 2 === flip;
-        const rgb = isActive ? primary : hasSecondary ? secondary : scaleRgb(primary, 0.08);
-        return rgb;
+        const isActive = activeCount === 1 ? flip === 0 : Math.floor(device.col / colStride) % 2 === flip;
+        return isActive ? primary : hasSecondary ? secondary : scaleRgb(primary, 0.08);
       };
       outRgb = mix < 1 ? lerpRgb(evalStep(prevStep), evalStep(step), mix) : evalStep(step);
       break;
     }
     case 'random_device_chase': {
-      const { step, prevStep, mix } = computeSteppedFade(tSec, Math.max(1, p.frequency * 2), p.fadeTimeMs);
+      const { step, prevStep, mix } = computeSteppedFade(tSec + phaseOffset, Math.max(1, p.frequency * 2), p.fadeTimeMs);
       const bg = hasVisibleSecondary ? secondary : { r: 0, g: 0, b: 0 };
       const evalStep = (s: number) => {
         const picked = hashFloat(s * 97 + device.fixtureNumber * 13) < densityFactor;
@@ -515,18 +569,18 @@ export function evaluateEffectLayer(
     case 'sequential_device_chase': {
       if (activeCount === 1) {
         const rate = Math.max(0.8, p.frequency);
-        const cyc = (tSec * rate) % 1;
+        const cyc = (tSec * rate + phaseOffset) % 1;
         const beat = (Math.sin(cyc * Math.PI * 2) + 1) / 2;
         const trough = hasSecondary ? secondary : scaleRgb(primary, 0.08);
         outRgb = lerpRgb(trough, primary, beat);
         break;
       }
-      const { step, prevStep, mix } = computeSteppedFade(tSec, Math.max(1, p.frequency * 1.5), p.fadeTimeMs);
+      const { step, prevStep, mix } = computeSteppedFade(tSec + phaseOffset, Math.max(1, p.frequency * 1.5), p.fadeTimeMs);
       const bg = hasSecondary ? secondary : { r: 0, g: 0, b: 0 };
+      const span = Math.max(1, Math.round(((sizeNorm * 0.6 + widthNorm * 0.4) * activeCount * spreadFactor) / 2));
       const evalStep = (s: number) => {
         const stepIdx = s % activeCount;
         const activeIndex = p.direction === 'reverse' ? activeCount - 1 - stepIdx : stepIdx;
-        const span = Math.max(1, Math.round((sizeNorm * activeCount) / 2));
         const dist = Math.abs(orderedIdx - activeIndex);
         return dist < span ? primary : bg;
       };
@@ -536,60 +590,67 @@ export function evaluateEffectLayer(
 
     // Flash Effects
     case 'flash_single': {
-      const cyc = (tSec * Math.max(0.5, p.frequency)) % 1;
-      flashActive = cyc < 0.14;
+      const cyc = (tSec * Math.max(0.5, p.frequency) + phaseOffset) % 1;
+      const duty = clamp(0.08 + widthNorm * 0.25, 0.06, 0.45);
+      flashActive = cyc < duty;
       outRgb = flashActive ? primary : hasVisibleSecondary ? secondary : { r: 0, g: 0, b: 0 };
       weight = flashActive ? 1 : hasVisibleSecondary ? 1 : 0;
       break;
     }
     case 'flash_double': {
-      const cyc = (tSec * Math.max(0.5, p.frequency)) % 1;
-      flashActive = (cyc >= 0 && cyc < 0.1) || (cyc >= 0.18 && cyc < 0.28);
+      const cyc = (tSec * Math.max(0.5, p.frequency) + phaseOffset) % 1;
+      const w = clamp(0.06 + widthNorm * 0.1, 0.05, 0.16);
+      flashActive = (cyc >= 0 && cyc < w) || (cyc >= w + 0.08 && cyc < w * 2 + 0.08);
       outRgb = flashActive ? primary : hasVisibleSecondary ? secondary : { r: 0, g: 0, b: 0 };
       weight = flashActive ? 1 : hasVisibleSecondary ? 1 : 0;
       break;
     }
     case 'flash_triple': {
-      const cyc = (tSec * Math.max(0.5, p.frequency)) % 1;
+      const cyc = (tSec * Math.max(0.5, p.frequency) + phaseOffset) % 1;
+      const w = clamp(0.05 + widthNorm * 0.07, 0.04, 0.12);
       flashActive =
-        (cyc >= 0 && cyc < 0.08) ||
-        (cyc >= 0.14 && cyc < 0.22) ||
-        (cyc >= 0.28 && cyc < 0.36);
+        (cyc >= 0 && cyc < w) ||
+        (cyc >= w + 0.06 && cyc < w * 2 + 0.06) ||
+        (cyc >= w * 2 + 0.12 && cyc < w * 3 + 0.12);
       outRgb = flashActive ? primary : hasVisibleSecondary ? secondary : { r: 0, g: 0, b: 0 };
       weight = flashActive ? 1 : hasVisibleSecondary ? 1 : 0;
       break;
     }
     case 'flash_random': {
-      const step = Math.floor(tSec * Math.max(2, p.frequency * 4));
-      flashActive = hashFloat(step * 43 + device.fixtureNumber * 19) < densityFactor * 0.6;
+      const step = Math.floor(tSec * Math.max(2, p.frequency * 4) + phaseOffset * 4);
+      flashActive = hashFloat(step * 43 + device.fixtureNumber * 19) < densityFactor * 0.65;
       outRgb = flashActive ? primary : hasVisibleSecondary ? secondary : { r: 0, g: 0, b: 0 };
       weight = flashActive ? 1 : hasVisibleSecondary ? 1 : 0;
       break;
     }
     case 'flash_group': {
       const rate = Math.max(1, p.frequency);
-      const step = Math.floor(tSec * rate);
+      const step = Math.floor(tSec * rate + phaseOffset);
       const distinctGroups = Array.from(new Set(pool.map((d) => d.groupId))).sort();
       const groupIdx = Math.max(0, distinctGroups.indexOf(device.groupId));
       const parityMatch =
         distinctGroups.length <= 1 ? step % 2 === 0 : step % distinctGroups.length === groupIdx;
-      flashActive = parityMatch && (tSec * rate) % 1 < 0.4;
+      const duty = clamp(0.2 + widthNorm * 0.45, 0.15, 0.7);
+      flashActive = parityMatch && ((tSec * rate + phaseOffset) % 1) < duty;
       outRgb = flashActive ? primary : hasVisibleSecondary ? secondary : { r: 0, g: 0, b: 0 };
       weight = flashActive ? 1 : hasVisibleSecondary ? 1 : 0;
       break;
     }
     case 'flash_alternating': {
-      const cyc = (tSec * Math.max(1, p.frequency)) % 1;
-      const parity = Math.floor(tSec * Math.max(1, p.frequency)) % 2;
-      flashActive = (activeCount === 1 ? parity === 0 : orderedIdx % 2 === parity) && cyc < 0.45;
+      const rate = Math.max(1, p.frequency);
+      const cyc = (tSec * rate + phaseOffset) % 1;
+      const parity = Math.floor(tSec * rate + phaseOffset) % 2;
+      const duty = clamp(0.2 + widthNorm * 0.45, 0.15, 0.7);
+      flashActive = (activeCount === 1 ? parity === 0 : orderedIdx % 2 === parity) && cyc < duty;
       outRgb = flashActive ? primary : hasVisibleSecondary ? secondary : { r: 0, g: 0, b: 0 };
       weight = flashActive ? 1 : hasVisibleSecondary ? 1 : 0;
       break;
     }
     case 'flash_bouncing': {
       const bouncePos = applyDirectionPhase(rawPhase * 1.2, 'pingpong');
-      const dist = Math.abs(x - bouncePos);
-      const band = gaussianBand(dist, Math.max(0.08, sizeNorm * 0.45));
+      const dist = Math.abs(spreadX - bouncePos);
+      const beam = clamp(sizeNorm * 0.34 + widthNorm * 0.22, 0.06, 0.72);
+      const band = gaussianBand(dist, beam);
       flashActive = band > 0.35;
       const smoothBand = band < 0.01 ? 0 : band;
       if (hasVisibleSecondary) {
@@ -604,8 +665,9 @@ export function evaluateEffectLayer(
     case 'flash_left_to_right':
     case 'flash_right_to_left': {
       const pos = layer.type === 'flash_right_to_left' ? 1 - (rawPhase % 1) : rawPhase % 1;
-      const dist = Math.abs(x - pos);
-      const band = gaussianBand(dist, Math.max(0.08, sizeNorm * 0.4));
+      const dist = Math.abs(spreadX - pos);
+      const beam = clamp(sizeNorm * 0.32 + widthNorm * 0.22, 0.06, 0.72);
+      const band = gaussianBand(dist, beam);
       flashActive = band > 0.35;
       const smoothBand = band < 0.01 ? 0 : band;
       if (hasVisibleSecondary) {
@@ -618,9 +680,14 @@ export function evaluateEffectLayer(
       break;
     }
     case 'flash_centre_out': {
-      const distFromCentre = Math.hypot(x - 0.5, y - 0.5) / Math.SQRT1_2;
+      const distFromCentre = clamp(
+        (Math.hypot(normX - 0.5, normY - 0.5) / Math.SQRT1_2) * spreadFactor,
+        0,
+        1,
+      );
       const pos = rawPhase % 1;
-      const band = gaussianBand(Math.abs(distFromCentre - pos), Math.max(0.08, sizeNorm * 0.4));
+      const beam = clamp(sizeNorm * 0.32 + widthNorm * 0.22, 0.06, 0.72);
+      const band = gaussianBand(Math.abs(distFromCentre - pos), beam);
       flashActive = band > 0.35;
       const smoothBand = band < 0.01 ? 0 : band;
       if (hasVisibleSecondary) {
@@ -633,21 +700,89 @@ export function evaluateEffectLayer(
       break;
     }
     case 'flash_staggered': {
-      const localPhase = (tSec * Math.max(0.5, p.frequency) + orderedIdx * 0.17) % 1;
-      flashActive = localPhase < 0.22;
+      const stagger = 0.17 * spreadFactor;
+      const localPhase = ((tSec * Math.max(0.5, p.frequency) + phaseOffset + orderedIdx * stagger) % 1 + 1) % 1;
+      const duty = clamp(0.14 + widthNorm * 0.35, 0.08, 0.55);
+      flashActive = localPhase < duty;
       outRgb = flashActive ? primary : hasVisibleSecondary ? secondary : { r: 0, g: 0, b: 0 };
       weight = flashActive ? 1 : hasVisibleSecondary ? 1 : 0;
+      break;
+    }
+    case 'beat_flash': {
+      const bpm = clamp(p.bpm || 120, 40, 240);
+      const steps = Math.max(2, Math.min(16, Math.round(p.beatSteps || 8)));
+      const beatStepRate = (bpm / 60) * clamp(speed, 0.2, 5);
+      const totalSteps = (elapsedMs / 1000) * beatStepRate + phaseOffset * steps;
+      const rawStepIdx = Math.floor(totalSteps);
+      const stepFrac = totalSteps - rawStepIdx;
+
+      let stepInBar = ((rawStepIdx % steps) + steps) % steps;
+      if (p.direction === 'reverse') {
+        stepInBar = steps - 1 - stepInBar;
+      } else if (p.direction === 'pingpong' && steps > 1) {
+        const span = (steps - 1) * 2;
+        const cyc = ((rawStepIdx % span) + span) % span;
+        stepInBar = cyc < steps ? cyc : span - cyc;
+      }
+
+      const pattern = p.beatStepPattern;
+      const stepEnabled =
+        Array.isArray(pattern) && pattern.length > 0
+          ? Boolean(pattern[stepInBar % pattern.length])
+          : stepInBar % Math.max(1, Math.round(p.beatFlashEvery || 1)) === 0;
+
+      const duty = clamp(0.18 + widthNorm * 0.72, 0.15, 0.92);
+      const decaySharpness = p.fadeTimeMs > 0 ? clamp(1200 / p.fadeTimeMs, 1.2, 12) : 0;
+      const stepEnv = !stepEnabled
+        ? 0
+        : p.fadeTimeMs > 0
+          ? stepFrac <= duty
+            ? Math.exp(-(stepFrac / Math.max(0.08, duty)) * decaySharpness * 0.5)
+            : 0
+          : stepFrac < duty
+            ? 1
+            : 0;
+
+      const spreadMode = p.beatSpreadMode || 'all';
+      let deviceMask = 1;
+      if (activeCount > 1) {
+        if (spreadMode === 'chase') {
+          const activePos = stepInBar / Math.max(1, steps - 1);
+          const beamBreadth = clamp(widthNorm * 0.22 + sizeNorm * 0.22 + spreadFactor * 0.16, 0.05, 0.85);
+          deviceMask = gaussianBand(Math.abs(normX - activePos), beamBreadth);
+          if (deviceMask < 0.08) deviceMask = 0;
+        } else if (spreadMode === 'alternate') {
+          const parity = rawStepIdx % 2;
+          deviceMask = orderedIdx % 2 === parity ? 1 : 0;
+        } else if (spreadMode === 'random') {
+          const threshold = clamp(densityFactor, 0.08, 1);
+          deviceMask = hashFloat(rawStepIdx * 61 + device.fixtureNumber * 17) < threshold ? 1 : 0;
+        }
+      }
+
+      const finalPulse = clamp(stepEnv * deviceMask, 0, 1);
+      flashActive = finalPulse > 0.35;
+      if (hasVisibleSecondary) {
+        outRgb = lerpRgb(secondary, primary, finalPulse);
+        weight = 1;
+      } else {
+        outRgb = primary;
+        weight = finalPulse;
+      }
       break;
     }
 
     // Advanced Effects (Primary = Hero Colour, Secondary = Dark Base / Trough)
     case 'fire_simulation': {
+      const sx = normX * (6 + 10 * spreadFactor * sizeNorm);
+      const sy = normY * (4 + 4 * sizeNorm);
       const flicker =
         0.55 +
         0.45 *
-          Math.sin(tSec * 9.3 + x * 11 + y * 5) *
-          Math.cos(tSec * 5.7 + device.fixtureNumber);
-      const heat = clamp((1 - y * 0.55) * flicker, 0, 1);
+          Math.sin(tSec * (6 + 3.5 * freqFactor) + sx + sy) *
+          Math.cos(tSec * (4 + 1.8 * freqFactor) + device.fixtureNumber);
+      const heightFalloff = clamp(1 - normY * (0.35 + (1 - widthNorm) * 0.4), 0.15, 1);
+      const heat = clamp(heightFalloff * flicker * (0.65 + 0.45 * densityFactor), 0, 1);
       const firePalette =
         palette.length >= 2
           ? [palette[1], palette[0], ...palette.slice(2)]
@@ -657,8 +792,12 @@ export function evaluateEffectLayer(
       break;
     }
     case 'water_flow': {
+      const kScale = 4 + 8 * spreadFactor * (0.5 + sizeNorm * 0.8);
       const ripple =
-        (Math.sin(x * 8 - tSec * 3.2) + Math.cos(y * 6 + tSec * 2.1)) * 0.25 + 0.5;
+        (Math.sin(normX * kScale - tSec * 3.2 * freqFactor + phaseOffset * 6.28) +
+          Math.cos(normY * (kScale * 0.75) + tSec * 2.1 * freqFactor)) *
+          (0.2 + widthNorm * 0.15) +
+        0.5;
       const waterPalette =
         palette.length >= 2
           ? [palette[1], palette[0], ...palette.slice(2)]
@@ -667,8 +806,13 @@ export function evaluateEffectLayer(
       break;
     }
     case 'aurora': {
+      const ax = normX * (3.5 + 3.5 * spreadFactor * sizeNorm);
+      const ay = normY * (2.5 + 2.5 * widthNorm);
       const drift =
-        (Math.sin(x * 4.5 + tSec * 0.9) + Math.sin(y * 3.1 - tSec * 0.6) + 2) / 4;
+        (Math.sin(ax + tSec * 0.9 * freqFactor + phaseOffset * 6.28) +
+          Math.sin(ay - tSec * 0.6 * freqFactor) +
+          2) /
+        4;
       const auroraPalette =
         palette.length >= 2
           ? [palette[1], palette[0], ...palette.slice(2)]
@@ -677,9 +821,14 @@ export function evaluateEffectLayer(
       break;
     }
     case 'electric_pulse': {
-      const pulse = Math.pow(Math.sin(tSec * 4 - x * 6), 8);
-      const sparkStep = Math.floor(tSec * 8);
-      const spark = hashFloat(sparkStep * 29 + device.fixtureNumber) > 0.82 ? 0.85 : 0;
+      const arcTightness = Math.round(clamp(10 - widthNorm * 6, 3, 12));
+      const pulse = Math.pow(
+        Math.sin(tSec * 4 * freqFactor - normX * 6 * spreadFactor + phaseOffset * 6.28),
+        arcTightness % 2 === 0 ? arcTightness : arcTightness + 1,
+      );
+      const sparkStep = Math.floor(tSec * 8 * freqFactor);
+      const sparkThreshold = clamp(1 - densityFactor * 0.45, 0.4, 0.96);
+      const spark = hashFloat(sparkStep * 29 + device.fixtureNumber) > sparkThreshold ? 0.85 : 0;
       const energy = clamp(pulse + spark * 0.7, 0, 1);
       const baseElectric = hasSecondary ? secondary : hexToRgb('#041B4D');
       const peakElectric = palette.length >= 3 ? hexToRgb(palette[2]) : primary;
@@ -692,24 +841,26 @@ export function evaluateEffectLayer(
       break;
     }
     case 'digital_rainbow': {
+      const quantSteps = Math.max(3, Math.round(4 + densityFactor * 12));
+      const spatial = normX * spreadFactor * (0.6 + sizeNorm * 0.9);
       if (palette.length >= 2 && !isDefaultRainbowPalette(palette)) {
-        const steps = Math.max(4, palette.length * 2);
-        const step = Math.floor((((x * spreadFactor + rawPhase) % 1) + 1) % 1 * steps);
+        const step = Math.floor((((spatial + rawPhase) % 1) + 1) % 1 * quantSteps);
         outRgb = hexToRgb(palette[step % palette.length]);
       } else {
-        const step = Math.floor(((x * spreadFactor + rawPhase) * 8) % 8);
-        const hue = ((step * 45) % 360 + 360) % 360;
+        const step = Math.floor((((spatial + rawPhase) % 1) + 1) % 1 * quantSteps);
+        const hue = ((step * (360 / quantSteps)) % 360 + 360) % 360;
         outRgb = hsvToRgb(hue, 100, 100);
       }
       break;
     }
     case 'matrix_rain': {
-      const colSeed = hashFloat(Math.round(x * 20) * 19 + 3);
-      const dropPos = (tSec * 0.7 + colSeed) % 1;
-      const dist = (y - dropPos + 1) % 1;
-      const tailSpan = activeCount === 1 ? 0.65 : 0.42;
+      const colBuckets = Math.max(4, Math.round(8 + densityFactor * 24));
+      const colSeed = hashFloat(Math.round(normX * colBuckets) * 19 + 3);
+      const dropPos = (tSec * 0.7 * freqFactor + colSeed + phaseOffset) % 1;
+      const dist = (normY - dropPos + 1) % 1;
+      const tailSpan = clamp((activeCount === 1 ? 0.55 : 0.35) + widthNorm * 0.45, 0.12, 0.92);
       const tail = dist < tailSpan ? 1 - dist / tailSpan : 0;
-      const headGlow = dist < 0.1 ? 1 - dist / 0.1 : 0;
+      const headGlow = dist < 0.12 ? 1 - dist / 0.12 : 0;
       const tailRgb = primary;
       const bgRgb = hasSecondary ? secondary : { r: 0, g: 12, b: 4 };
       const headRgb =
@@ -722,29 +873,35 @@ export function evaluateEffectLayer(
       break;
     }
     case 'gradient_movement': {
-      const pos = (((x * spreadFactor + applyDirectionPhase(rawPhase, p.direction)) % 1) + 1) % 1;
+      const pos = (((normX * spreadFactor * (0.5 + sizeNorm * 1.1) + applyDirectionPhase(rawPhase * (0.6 + 0.4 * freqFactor), p.direction)) % 1) + 1) % 1;
       outRgb = samplePaletteLoop(palette, pos);
       break;
     }
     case 'multi_layer': {
-      const w1 = (Math.sin((x + rawPhase) * Math.PI * 2) + 1) / 2;
-      const w2 = (Math.cos((y - rawPhase * 0.7) * Math.PI * 2) + 1) / 2;
-      outRgb = samplePalette(palette, (w1 + w2) / 2);
+      const spatialFreq = spreadFactor * (0.6 + sizeNorm * 1.2);
+      const w1 = (Math.sin((normX * spatialFreq + rawPhase * freqFactor) * Math.PI * 2) + 1) / 2;
+      const w2 = (Math.cos((normY * spatialFreq - rawPhase * 0.7 * freqFactor) * Math.PI * 2) + 1) / 2;
+      const mix = clamp(0.5 + (w1 + w2 - 1) * (0.4 + widthNorm * 0.6), 0, 1);
+      outRgb = samplePalette(palette, mix);
       break;
     }
     case 'sound_reactive': {
       const audio = clamp(p.audioLevel ?? 0.65, 0, 1);
-      const pulse = Math.pow((Math.sin(tSec * 5) + 1) / 2, 2);
+      const pulse = Math.pow((Math.sin(tSec * 2.5 * Math.max(0.5, p.frequency) + phaseOffset * 6.28) + 1) / 2, 2);
       const beat = clamp(0.18 + pulse * (0.45 + 0.55 * audio), 0, 1);
-      const rawDist = Math.hypot(x - 0.5, y - 0.5) / Math.SQRT1_2;
+      const rawDist = (Math.hypot(normX - 0.5, normY - 0.5) / Math.SQRT1_2) * spreadFactor;
       const effectiveDist = activeCount === 1 ? 0 : rawDist;
-      const reach = clamp(1 - Math.max(0, effectiveDist - beat * 0.95) * 2.4, 0.12, 1);
+      const reachWidth = clamp(0.75 + (1 - widthNorm) * 1.1, 0.4, 2.2);
+      const reach = clamp(1 - Math.max(0, effectiveDist - beat * (0.65 + sizeNorm * 0.85)) * reachWidth, 0.25, 1);
       outRgb = samplePaletteLoop(palette, rawPhase * 0.65 + effectiveDist * 0.25);
-      weight = clamp(reach * (0.25 + 0.75 * beat), 0.1, 1);
+      weight = clamp(reach * (0.25 + 0.75 * beat), 0.12, 1);
       break;
     }
     case 'custom_script': {
-      const wave = evaluateWaveform(rawPhase + x * 0.5, p.customPulseShape);
+      const wave = evaluateWaveform(
+        rawPhase * (0.6 + 0.4 * freqFactor) + spreadX * (0.4 + sizeNorm * 0.8),
+        p.customPulseShape,
+      );
       if (palette.length > 1) {
         outRgb = samplePalette(palette, wave);
         weight = 1;

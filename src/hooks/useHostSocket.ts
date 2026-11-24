@@ -74,12 +74,20 @@ export function useHostSocket() {
   const authRetryTimerRef = useRef<number | null>(null);
   const unmountedRef = useRef(false);
   const lastLocalMutationAtRef = useRef<number>(0);
+  const localMutationSeqRef = useRef<number>(0);
   const serverOffsetRef = useRef<number>(0);
   const pendingCommandsRef = useRef<Array<{ action: string; payload: Record<string, unknown>; showId: string }>>([]);
   const authFnRef = useRef<(passcode?: string) => Promise<boolean>>(async () => false);
 
   const sendCommandViaHttp = useCallback(
-    async (token: string, action: string, showId: string, payload: Record<string, unknown>, allowRetry = true) => {
+    async (
+      token: string,
+      action: string,
+      showId: string,
+      payload: Record<string, unknown>,
+      allowRetry = true,
+      cmdSeq = localMutationSeqRef.current,
+    ) => {
       try {
         const res = await fetch('/api/host/command', {
           method: 'POST',
@@ -93,7 +101,7 @@ export function useHostSocket() {
           tokenRef.current = null;
           const ok = await authFnRef.current();
           if (ok && tokenRef.current) {
-            await sendCommandViaHttp(tokenRef.current, action, showId, payload, false);
+            await sendCommandViaHttp(tokenRef.current, action, showId, payload, false, cmdSeq);
           }
           return;
         }
@@ -102,7 +110,9 @@ export function useHostSocket() {
         if (typeof data.serverTimeMs === 'number') {
           serverOffsetRef.current = data.serverTimeMs - Date.now();
         }
-        if (data.show) {
+        // Only overwrite local show state if no newer fader/button edit happened while request was in flight
+        const isLatestMutation = localMutationSeqRef.current === cmdSeq;
+        if (isLatestMutation && data.show) {
           showIdRef.current = data.show.id;
           cacheShowSnapshot(data.show);
         }
@@ -110,9 +120,9 @@ export function useHostSocket() {
           ...prev,
           httpSynced: true,
           serverOffsetMs: serverOffsetRef.current,
-          show: data.show || prev.show,
+          show: isLatestMutation && data.show ? data.show : prev.show,
           devices: data.devices || prev.devices,
-          showsList: data.shows || prev.showsList,
+          showsList: isLatestMutation && data.shows ? data.shows : prev.showsList,
         }));
       } catch {
         // Network issue — optimistic local state keeps console responsive
@@ -257,14 +267,19 @@ export function useHostSocket() {
             mediaAssets: msg.mediaAssets || prev.mediaAssets,
           }));
         } else if (msg.type === 'state_update') {
-          if (msg.show) cacheShowSnapshot(msg.show);
+          // Guard active mid-drag fader/slider operations against lagging WS echo overwrites
+          const activeDragWindow = Date.now() - lastLocalMutationAtRef.current < 180;
+          if (!activeDragWindow && msg.show) {
+            cacheShowSnapshot(msg.show);
+          }
           setState((prev) => ({
             ...prev,
             serverOffsetMs: offset,
-            show: msg.show || prev.show,
-            showsList: msg.show
-              ? prev.showsList.map((s) => (s.id === msg.show!.id ? msg.show! : s))
-              : prev.showsList,
+            show: !activeDragWindow && msg.show ? msg.show : prev.show,
+            showsList:
+              !activeDragWindow && msg.show
+                ? prev.showsList.map((s) => (s.id === msg.show!.id ? msg.show! : s))
+                : prev.showsList,
             mediaAssets: msg.mediaAssets || prev.mediaAssets,
           }));
         } else if (msg.type === 'devices_update') {
@@ -375,6 +390,7 @@ export function useHostSocket() {
   const sendHostCommand = useCallback(
     (action: string, payload: Record<string, unknown> = {}) => {
       lastLocalMutationAtRef.current = Date.now();
+      const cmdSeq = ++localMutationSeqRef.current;
       const targetShowId = showIdRef.current || state.show.id;
 
       // Apply optimistically at 0ms so console buttons, colour pickers, cues & sliders always reflect immediately
@@ -411,7 +427,7 @@ export function useHostSocket() {
       }
 
       if (tokenRef.current) {
-        sendCommandViaHttp(tokenRef.current, action, targetShowId, payload);
+        sendCommandViaHttp(tokenRef.current, action, targetShowId, payload, true, cmdSeq);
       } else {
         pendingCommandsRef.current.push({ action, payload, showId: targetShowId });
         authFnRef.current();

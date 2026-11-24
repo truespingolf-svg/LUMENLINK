@@ -399,7 +399,18 @@ export class ShowStore {
     if (outcome.devicesChanged && outcome.devices !== devices) {
       this.devicesByShow.set(show.id, outcome.devices);
     }
-    this.scheduleSave();
+    if (
+      action === 'delete_cue' ||
+      action === 'upsert_cue' ||
+      action === 'duplicate_cue' ||
+      action === 'reorder_cue' ||
+      action === 'save_timeline'
+    ) {
+      if (this.saveTimer) clearTimeout(this.saveTimer);
+      this.saveNow();
+    } else {
+      this.scheduleSave();
+    }
     return {
       show: outcome.show,
       devicesChanged: outcome.devicesChanged,

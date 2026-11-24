@@ -46,6 +46,7 @@ export type EffectType =
   | 'flash_right_to_left'
   | 'flash_centre_out'
   | 'flash_staggered'
+  | 'beat_flash'
   // Advanced Effects
   | 'fire_simulation'
   | 'water_flow'
@@ -86,6 +87,11 @@ export interface EffectParameters {
   audioLevel?: number; // 0..1 when sound_reactive
   customHueShift?: number;
   customPulseShape?: 'sine' | 'square' | 'triangle' | 'sawtooth';
+  bpm?: number; // 40..240 BPM for beat-synced effects
+  beatSteps?: number; // 2..16 steps per bar
+  beatStepPattern?: boolean[]; // active flash steps within bar
+  beatFlashEvery?: number; // quick interval: flash every Nth step
+  beatSpreadMode?: 'all' | 'chase' | 'alternate' | 'random';
 }
 
 export interface ActiveEffectLayer {

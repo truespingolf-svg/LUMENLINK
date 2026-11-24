@@ -12,9 +12,10 @@ import {
   createDefaultEffectParams,
   EFFECT_CATALOG,
   getDefaultPaletteForEffect,
-  renderFixtureOutput,
 } from '../../engine/effects';
 import { RotaryEncoder } from './HardwareControls';
+import { EffectStagePreview } from './EffectStagePreview';
+import { BeatSequencerControls } from './BeatSequencerControls';
 
 interface EffectEditorPanelProps {
   show: ShowFile;
@@ -106,72 +107,13 @@ export const EffectEditorPanel: React.FC<EffectEditorPanelProps> = ({
     [category],
   );
 
-  // Live spatial preview canvas (uses real multi-device layout, or 6x3 stage preview when 0-1 devices connected)
-  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    let raf = 0;
-    const renderPreview = () => {
-      const canvas = previewCanvasRef.current;
-      if (canvas) {
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          const w = canvas.width;
-          const h = canvas.height;
-          ctx.fillStyle = '#090B0E';
-          ctx.fillRect(0, 0, w, h);
-
-          const previewDevices: AudienceDevice[] =
-            devices.length > 1
-              ? devices
-              : Array.from({ length: 18 }, (_, i) => {
-                  const r = Math.floor(i / 6);
-                  const c = i % 6;
-                  return {
-                    id: i === 0 && devices[0] ? devices[0].id : `prev-${i}`,
-                    fixtureNumber: i === 0 && devices[0] ? devices[0].fixtureNumber : i + 1,
-                    name: i === 0 && devices[0] ? devices[0].name : `F${i + 1}`,
-                    deviceType: 'smartphone',
-                    orientation: 'portrait',
-                    status: 'connected',
-                    batteryLevel: 100,
-                    lastSeenMs: Date.now(),
-                    joinedAtMs: Date.now(),
-                    groupId: i === 0 && devices[0] ? devices[0].groupId : (show.groups[0]?.id || 'grp-floor'),
-                    excluded: false,
-                    x: (c + 0.5) / 6,
-                    y: (r + 0.5) / 3,
-                    row: r,
-                    col: c,
-                    overrideColor: null,
-                    identifyUntilMs: 0,
-                  };
-                });
-
-          const now = Date.now() + serverOffsetMs;
-          const previewLighting = {
-            ...show.lighting,
-            layers: activeLayer.enabled ? show.lighting.layers : [{ ...activeLayer, enabled: true }],
-          };
-
-          for (let idx = 0; idx < previewDevices.length; idx++) {
-            const d = previewDevices[idx];
-            const out = renderFixtureOutput(d, previewDevices, show.groups, previewLighting, now);
-            const px = d.x * w;
-            const py = d.y * h;
-            ctx.fillStyle = out.colorHex;
-            ctx.fillRect(px - 10, py - 15, 20, 30);
-            ctx.strokeStyle = devices.length === 1 && idx === 0 ? '#F59E0B' : '#334155';
-            ctx.lineWidth = devices.length === 1 && idx === 0 ? 2 : 1;
-            ctx.strokeRect(px - 10, py - 15, 20, 30);
-          }
-        }
-      }
-      raf = requestAnimationFrame(renderPreview);
-    };
-    raf = requestAnimationFrame(renderPreview);
-    return () => cancelAnimationFrame(raf);
-  }, [activeLayer, devices, serverOffsetMs, show.groups, show.lighting]);
+  const previewLighting = useMemo(
+    () => ({
+      ...show.lighting,
+      layers: activeLayer.enabled ? show.lighting.layers : [{ ...activeLayer, enabled: true }],
+    }),
+    [activeLayer, show.lighting],
+  );
 
   // Microphone audio level capture for sound_reactive effect
   useEffect(() => {
@@ -261,6 +203,7 @@ export const EffectEditorPanel: React.FC<EffectEditorPanelProps> = ({
       startedAtMs: Date.now() + serverOffsetMs,
       params: {
         ...activeLayer.params,
+        speed: type === 'beat_flash' ? 1 : activeLayer.params.speed,
         repetitions: 0,
         delayMs: 0,
         fixtureRangeStart: 1,
@@ -289,7 +232,6 @@ export const EffectEditorPanel: React.FC<EffectEditorPanelProps> = ({
   };
 
   const p = activeLayer.params;
-  const connectedDevicesCount = devices.filter((d) => d.status === 'connected').length;
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
@@ -422,43 +364,15 @@ export const EffectEditorPanel: React.FC<EffectEditorPanelProps> = ({
       {/* Right: Effect Parameters + Live Preview */}
       <div className="xl:col-span-7 flex flex-col gap-4">
         {/* Live Effect Preview */}
-        <div className="console-panel rounded-md p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-            <h3 className="font-display text-sm font-semibold tracking-wider uppercase text-slate-100">
-              Live Effect Preview — {activeLayer.name}
-            </h3>
-            <div className="flex items-center gap-2 text-xs font-mono-tabular console-well px-2.5 py-0.5 rounded">
-              <span className={connectedDevicesCount > 0 ? 'text-emerald-400' : 'text-slate-500'}>
-                {connectedDevicesCount} DEVICE{connectedDevicesCount === 1 ? '' : 'S'} LIVE
-              </span>
-              <span className={activeLayer.enabled ? 'text-amber-400 font-semibold' : 'text-red-400 font-semibold'}>
-                {activeLayer.enabled ? '· RUNNING' : '· LAYER OFF'}
-              </span>
-            </div>
-          </div>
-          <div className="relative">
-            <canvas
-              ref={previewCanvasRef}
-              width={560}
-              height={140}
-              className="w-full h-36 rounded console-well"
-            />
-            {!activeLayer.enabled && (
-              <div className="absolute inset-0 bg-black/55 rounded flex items-center justify-center gap-3 px-4">
-                <span className="text-xs font-semibold text-amber-200">
-                  Layer is OFF (Preview Only)
-                </span>
-                <button
-                  type="button"
-                  onClick={() => pushLayer({ ...activeLayer, enabled: true })}
-                  className="console-btn-amber px-3 py-1.5 rounded text-xs font-semibold"
-                >
-                  Enable Live Output
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+        <EffectStagePreview
+          title={`Live Effect Preview — ${activeLayer.name}`}
+          devices={devices}
+          groups={show.groups}
+          lighting={previewLighting}
+          serverOffsetMs={serverOffsetMs}
+          isLiveRunning={activeLayer.enabled}
+          onEnableLive={() => pushLayer({ ...activeLayer, enabled: true })}
+        />
 
         {/* Effect Colours & Palette (Prominent per-effect colour adjuster) */}
         <div className="console-panel rounded-md p-3.5 space-y-2.5 text-xs">
@@ -602,6 +516,16 @@ export const EffectEditorPanel: React.FC<EffectEditorPanelProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Beat Step Sequencer (when Beat Step Flash is active) */}
+        {activeLayer.type === 'beat_flash' && (
+          <BeatSequencerControls
+            params={p}
+            startedAtMs={activeLayer.startedAtMs}
+            serverOffsetMs={serverOffsetMs}
+            onChange={(patch) => updateParams(patch)}
+          />
+        )}
 
         {/* Parameters */}
         <div className="console-panel rounded-md p-4 space-y-4">

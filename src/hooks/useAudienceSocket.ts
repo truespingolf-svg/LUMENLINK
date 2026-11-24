@@ -11,6 +11,8 @@ export interface PublicShowInfo {
 export interface AudienceSocketState {
   publicInfo: PublicShowInfo | null;
   loadingInfo: boolean;
+  joining: boolean;
+  joinError: string | null;
   joined: boolean;
   connected: boolean;
   reconnecting: boolean;
@@ -50,6 +52,8 @@ export function useAudienceSocket(showIdParam?: string) {
   const [state, setState] = useState<AudienceSocketState>({
     publicInfo: null,
     loadingInfo: true,
+    joining: false,
+    joinError: null,
     joined: false,
     connected: false,
     reconnecting: false,
@@ -64,6 +68,8 @@ export function useAudienceSocket(showIdParam?: string) {
   const deviceIdRef = useRef<string>(getOrCreateDeviceId());
   const customNameRef = useRef<string>('');
   const joinedRef = useRef(false);
+  const httpHealthyRef = useRef(false);
+  const wsConnectedRef = useRef(false);
   const unmountedRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
   const heartbeatTimerRef = useRef<number | null>(null);
@@ -73,7 +79,7 @@ export function useAudienceSocket(showIdParam?: string) {
     unmountedRef.current = false;
     const targetId = showIdParam || 'active';
     fetch(`/api/public/show/${encodeURIComponent(targetId)}`)
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data: PublicShowInfo) => {
         if (!unmountedRef.current) {
           setState((prev) => ({ ...prev, publicInfo: data, loadingInfo: false }));
@@ -109,66 +115,20 @@ export function useAudienceSocket(showIdParam?: string) {
     };
   }, [showIdParam]);
 
-  const registerViaHttp = useCallback(async () => {
-    if (unmountedRef.current) return;
-    try {
-      const res = await fetch('/api/public/audience/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          showId: showIdParam || undefined,
-          deviceId: deviceIdRef.current,
-          payload: {
-            name: customNameRef.current || undefined,
-            deviceType: detectDeviceType(),
-            orientation: getOrientation(),
-            batteryLevel: batteryLevelRef.current,
-            screenWidth: window.innerWidth,
-            screenHeight: window.innerHeight,
-          },
-        }),
-      });
-      if (!res.ok || unmountedRef.current) return;
-      const data = await res.json();
-      const offset = data.serverTimeMs ? data.serverTimeMs - Date.now() : 0;
-      setState((prev) => ({
-        ...prev,
-        joined: true,
-        connected: true,
-        reconnecting: false,
-        disconnectedByHost: false,
-        serverOffsetMs: offset,
-        show: data.show || prev.show,
-        device: data.device || prev.device,
-        allDevices: data.devices || prev.allDevices,
-      }));
-    } catch {
-      // Ignore transient HTTP fallback error
-    }
-  }, [showIdParam]);
-
-  const connectAudience = useCallback(
-    (nameOverride?: string) => {
-      if (unmountedRef.current) return;
-      if (nameOverride !== undefined) customNameRef.current = nameOverride;
-      joinedRef.current = true;
-
-      if (wsRef.current) {
-        wsRef.current.onclose = null;
-        wsRef.current.close();
+  const registerViaHttp = useCallback(async (): Promise<boolean> => {
+    if (unmountedRef.current) return false;
+    const targetId = showIdParam || 'active';
+    const delays = [0, 350, 800];
+    for (let attempt = 0; attempt < delays.length; attempt++) {
+      if (delays[attempt] > 0) {
+        await new Promise((r) => window.setTimeout(r, delays[attempt]));
       }
-
-      // Immediately register over HTTP too so the screen renders live lighting instantly even if WSS is slow/blocked
-      registerViaHttp();
-
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${proto}//${window.location.host}/ws`);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        ws.send(
-          JSON.stringify({
-            type: 'register_audience',
+      if (unmountedRef.current) return false;
+      try {
+        const res = await fetch('/api/public/audience/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
             showId: showIdParam || undefined,
             deviceId: deviceIdRef.current,
             payload: {
@@ -180,113 +140,233 @@ export function useAudienceSocket(showIdParam?: string) {
               screenHeight: window.innerHeight,
             },
           }),
-        );
-
-        if (heartbeatTimerRef.current) window.clearInterval(heartbeatTimerRef.current);
-        heartbeatTimerRef.current = window.setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              JSON.stringify({
-                type: 'audience_heartbeat',
-                deviceId: deviceIdRef.current,
-                payload: {
-                  orientation: getOrientation(),
-                  batteryLevel: batteryLevelRef.current,
-                  screenWidth: window.innerWidth,
-                  screenHeight: window.innerHeight,
-                  isFullscreen: Boolean(document.fullscreenElement),
-                },
-              }),
-            );
-          }
-        }, 4000);
-      };
-
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data) as WsMessageToClient;
-          const offset = msg.serverTimeMs ? msg.serverTimeMs - Date.now() : 0;
-
-          if (msg.type === 'welcome_sync') {
-            setState((prev) => ({
-              ...prev,
-              joined: true,
-              connected: true,
-              reconnecting: false,
-              disconnectedByHost: false,
-              serverOffsetMs: offset,
-              show: msg.show || prev.show,
-              device: msg.device || prev.device,
-              allDevices: msg.devices || prev.allDevices,
-            }));
-          } else if (msg.type === 'state_update') {
-            setState((prev) => {
-              const baseShow = msg.show || prev.show;
-              const mergedShow = baseShow
-                ? {
-                    ...baseShow,
-                    lighting: msg.lighting || baseShow.lighting,
-                    playback: msg.playback || baseShow.playback,
-                  }
-                : null;
-              return {
-                ...prev,
-                serverOffsetMs: offset,
-                show: mergedShow,
-              };
-            });
-          } else if (msg.type === 'devices_update') {
-            setState((prev) => {
-              const updatedSelf = msg.devices?.find((d) => d.id === deviceIdRef.current) || prev.device;
-              return {
-                ...prev,
-                device: updatedSelf,
-                allDevices: msg.devices || prev.allDevices,
-              };
-            });
-          } else if (msg.type === 'identify_pulse') {
-            setState((prev) => ({
-              ...prev,
-              device: prev.device
-                ? { ...prev.device, identifyUntilMs: msg.identifyUntilMs || Date.now() + 4000 }
-                : prev.device,
-            }));
-          } else if (msg.type === 'ping_sync') {
-            setState((prev) => ({ ...prev, serverOffsetMs: offset }));
-          }
-        } catch {
-          // Ignore malformed message
-        }
-      };
-
-      ws.onclose = (ev) => {
-        if (heartbeatTimerRef.current) window.clearInterval(heartbeatTimerRef.current);
-        const byHost = ev.code === 4001;
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (unmountedRef.current) return false;
+        httpHealthyRef.current = true;
+        const offset = data.serverTimeMs ? data.serverTimeMs - Date.now() : 0;
         setState((prev) => ({
           ...prev,
-          connected: false,
-          reconnecting: !byHost && joinedRef.current,
-          disconnectedByHost: byHost,
+          joining: false,
+          joinError: null,
+          joined: true,
+          connected: true,
+          reconnecting: false,
+          disconnectedByHost: false,
+          serverOffsetMs: offset,
+          show: data.show || prev.show,
+          device: data.device || prev.device,
+          allDevices: data.devices || prev.allDevices,
         }));
-        if (!unmountedRef.current && joinedRef.current && !byHost) {
-          if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
-          reconnectTimerRef.current = window.setTimeout(() => {
-            connectAudience();
-          }, 1500);
+        return true;
+      } catch {
+        // Retry next attempt
+      }
+    }
+
+    // Fallback to GET /live?autoRegister=1 in case POST is blocked by a proxy
+    try {
+      const url = `/api/public/show/${encodeURIComponent(targetId)}/live?deviceId=${encodeURIComponent(
+        deviceIdRef.current,
+      )}&autoRegister=1&name=${encodeURIComponent(customNameRef.current || '')}`;
+      const res = await fetch(url);
+      if (res.ok && !unmountedRef.current) {
+        const data = await res.json();
+        httpHealthyRef.current = true;
+        const offset = data.serverTimeMs ? data.serverTimeMs - Date.now() : 0;
+        setState((prev) => ({
+          ...prev,
+          joining: false,
+          joinError: null,
+          joined: true,
+          connected: true,
+          reconnecting: false,
+          disconnectedByHost: false,
+          serverOffsetMs: offset,
+          show: data.show || prev.show,
+          device: data.device || prev.device,
+          allDevices: data.devices || prev.allDevices,
+        }));
+        return true;
+      }
+    } catch {
+      // Ignore fallback error
+    }
+
+    return false;
+  }, [showIdParam]);
+
+  const openWebSocket = useCallback(() => {
+    if (unmountedRef.current) return;
+    if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.close();
+    }
+
+    let ws: WebSocket;
+    try {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${proto}//${window.location.host}/ws`);
+    } catch {
+      return;
+    }
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      wsConnectedRef.current = true;
+      ws.send(
+        JSON.stringify({
+          type: 'register_audience',
+          showId: showIdParam || undefined,
+          deviceId: deviceIdRef.current,
+          payload: {
+            name: customNameRef.current || undefined,
+            deviceType: detectDeviceType(),
+            orientation: getOrientation(),
+            batteryLevel: batteryLevelRef.current,
+            screenWidth: window.innerWidth,
+            screenHeight: window.innerHeight,
+          },
+        }),
+      );
+
+      if (heartbeatTimerRef.current) window.clearInterval(heartbeatTimerRef.current);
+      heartbeatTimerRef.current = window.setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              type: 'audience_heartbeat',
+              deviceId: deviceIdRef.current,
+              payload: {
+                orientation: getOrientation(),
+                batteryLevel: batteryLevelRef.current,
+                screenWidth: window.innerWidth,
+                screenHeight: window.innerHeight,
+                isFullscreen: Boolean(document.fullscreenElement),
+              },
+            }),
+          );
         }
-      };
+      }, 4000);
+    };
+
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data) as WsMessageToClient;
+        const offset = msg.serverTimeMs ? msg.serverTimeMs - Date.now() : 0;
+
+        if (msg.type === 'welcome_sync') {
+          setState((prev) => ({
+            ...prev,
+            joining: false,
+            joinError: null,
+            joined: true,
+            connected: true,
+            reconnecting: false,
+            disconnectedByHost: false,
+            serverOffsetMs: offset,
+            show: msg.show || prev.show,
+            device: msg.device || prev.device,
+            allDevices: msg.devices || prev.allDevices,
+          }));
+        } else if (msg.type === 'state_update') {
+          setState((prev) => {
+            const baseShow = msg.show || prev.show;
+            const mergedShow = baseShow
+              ? {
+                  ...baseShow,
+                  lighting: msg.lighting || baseShow.lighting,
+                  playback: msg.playback || baseShow.playback,
+                }
+              : null;
+            return {
+              ...prev,
+              connected: true,
+              serverOffsetMs: offset,
+              show: mergedShow,
+            };
+          });
+        } else if (msg.type === 'devices_update') {
+          setState((prev) => {
+            const updatedSelf = msg.devices?.find((d) => d.id === deviceIdRef.current) || prev.device;
+            return {
+              ...prev,
+              device: updatedSelf,
+              allDevices: msg.devices || prev.allDevices,
+            };
+          });
+        } else if (msg.type === 'identify_pulse') {
+          setState((prev) => ({
+            ...prev,
+            device: prev.device
+              ? { ...prev.device, identifyUntilMs: msg.identifyUntilMs || Date.now() + 4000 }
+              : prev.device,
+          }));
+        } else if (msg.type === 'ping_sync') {
+          setState((prev) => ({ ...prev, serverOffsetMs: offset }));
+        }
+      } catch {
+        // Ignore malformed message
+      }
+    };
+
+    ws.onclose = (ev) => {
+      wsConnectedRef.current = false;
+      if (heartbeatTimerRef.current) window.clearInterval(heartbeatTimerRef.current);
+      const byHost = ev.code === 4001;
+      setState((prev) => ({
+        ...prev,
+        connected: byHost ? false : httpHealthyRef.current ? true : false,
+        reconnecting: !byHost && joinedRef.current && !httpHealthyRef.current,
+        disconnectedByHost: byHost,
+      }));
+      if (!unmountedRef.current && joinedRef.current && !byHost) {
+        if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = window.setTimeout(() => {
+          openWebSocket();
+        }, httpHealthyRef.current ? 5000 : 1800);
+      }
+    };
+  }, [showIdParam]);
+
+  const connectAudience = useCallback(
+    (nameOverride?: string) => {
+      if (unmountedRef.current) return;
+      if (nameOverride !== undefined) customNameRef.current = nameOverride;
+      joinedRef.current = true;
+      setState((prev) => ({
+        ...prev,
+        joining: true,
+        joinError: null,
+        disconnectedByHost: false,
+      }));
+
+      openWebSocket();
+      registerViaHttp().then((ok) => {
+        if (!ok && !wsConnectedRef.current && !unmountedRef.current) {
+          setState((prev) => {
+            if (prev.joined) return { ...prev, joining: false };
+            return {
+              ...prev,
+              joining: false,
+              joinError: 'Unable to reach show server right now. Check connection and tap Join Show again.',
+            };
+          });
+        }
+      });
     },
-    [registerViaHttp, showIdParam],
+    [openWebSocket, registerViaHttp],
   );
 
-  // HTTP live polling fallback whenever joined & WebSocket is not open
+  // Fast HTTP live polling fallback whenever joined & WebSocket is not open
   useEffect(() => {
     if (!state.joined || state.disconnectedByHost) return;
     const isWsOpen = wsRef.current && wsRef.current.readyState === WebSocket.OPEN;
-    if (isWsOpen && state.connected) return;
+    if (isWsOpen && wsConnectedRef.current) return;
 
     const targetId = showIdParam || 'active';
-    const timer = window.setInterval(async () => {
+    const poll = async () => {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
       try {
         const res = await fetch(
@@ -294,6 +374,7 @@ export function useAudienceSocket(showIdParam?: string) {
         );
         if (!res.ok || unmountedRef.current) return;
         const data = await res.json();
+        httpHealthyRef.current = true;
         const offset = data.serverTimeMs ? data.serverTimeMs - Date.now() : 0;
         setState((prev) => ({
           ...prev,
@@ -305,10 +386,11 @@ export function useAudienceSocket(showIdParam?: string) {
           allDevices: data.devices || prev.allDevices,
         }));
       } catch {
-        // Ignore transient network poll failures
+        httpHealthyRef.current = false;
       }
-    }, 1000);
+    };
 
+    const timer = window.setInterval(poll, 450);
     return () => window.clearInterval(timer);
   }, [state.joined, state.connected, state.disconnectedByHost, showIdParam]);
 

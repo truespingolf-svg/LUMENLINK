@@ -301,18 +301,44 @@ async function startServer(): Promise<void> {
     });
   });
 
+  function buildLightAudienceShow(show: ReturnType<typeof store.getShow>) {
+    return {
+      ...show,
+      cues: [],
+      timelines: [],
+      posterDesign: {
+        ...show.posterDesign,
+        logoDataUrl: null,
+      },
+    };
+  }
+
   app.get('/api/public/show/:showId/live', (req, res) => {
     const nowMs = Date.now();
     const show = store.getShow(req.params.showId);
     const deviceId = typeof req.query.deviceId === 'string' ? req.query.deviceId : undefined;
     if (deviceId) {
-      store.updateAudienceMeta(show.id, deviceId, {}, nowMs);
+      const existing = store.getDevices(show.id).find((d) => d.id === deviceId);
+      if (existing) {
+        store.updateAudienceMeta(show.id, deviceId, {}, nowMs);
+      } else if (req.query.autoRegister === '1') {
+        store.registerAudienceDevice(
+          show.id,
+          {
+            deviceId,
+            name: typeof req.query.name === 'string' ? req.query.name : undefined,
+            deviceType: 'smartphone',
+            orientation: 'portrait',
+          },
+          nowMs,
+        );
+      }
     }
     const devices = store.getDevices(show.id);
     const selfDevice = deviceId ? devices.find((d) => d.id === deviceId) || null : null;
     res.json({
       serverTimeMs: nowMs,
-      show,
+      show: buildLightAudienceShow(show),
       lighting: show.lighting,
       playback: show.playback,
       device: selfDevice,
@@ -322,12 +348,19 @@ async function startServer(): Promise<void> {
 
   app.post('/api/public/audience/register', (req, res) => {
     const nowMs = Date.now();
-    const show = store.getShow(typeof req.body?.showId === 'string' ? req.body.showId : undefined);
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const show = store.getShow(
+      typeof body.showId === 'string'
+        ? body.showId
+        : typeof req.query.showId === 'string'
+          ? req.query.showId
+          : undefined,
+    );
     const deviceId =
-      typeof req.body?.deviceId === 'string' && req.body.deviceId
-        ? req.body.deviceId
+      typeof body.deviceId === 'string' && body.deviceId
+        ? body.deviceId
         : `dev-${crypto.randomUUID().slice(0, 8)}`;
-    const p = req.body?.payload || {};
+    const p = body.payload && typeof body.payload === 'object' ? body.payload : {};
     const device = store.registerAudienceDevice(
       show.id,
       {
@@ -349,7 +382,7 @@ async function startServer(): Promise<void> {
     });
     res.json({
       serverTimeMs: nowMs,
-      show,
+      show: buildLightAudienceShow(show),
       lighting: show.lighting,
       playback: show.playback,
       device,

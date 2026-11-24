@@ -119,6 +119,7 @@ input[type='range'] {
   background: transparent;
   cursor: pointer;
   height: 22px;
+  touch-action: none;
 }
 
 input[type='range']:focus {

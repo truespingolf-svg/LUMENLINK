@@ -296,8 +296,8 @@ test('samplePaletteLoop wraps smoothly across boundary t=0.99 to t=0.01 without 
   assert.ok(delta < 40, `Expected smooth wrap across t=1->0, got delta=${delta}`);
 });
 
-test('all 46 effects in EFFECT_CATALOG render dynamically and reflect custom primary/secondary colours', () => {
-  assert.equal(EFFECT_CATALOG.length, 46);
+test('all 47 effects in EFFECT_CATALOG render dynamically and reflect custom primary/secondary colours', () => {
+  assert.equal(EFFECT_CATALOG.length, 47);
   const d1 = makeDevice('d1', 1, 0.0833, 0.125, 'grp-a');
   const d2 = makeDevice('d2', 2, 0.5, 0.5, 'grp-b');
   const ghostDisconnected: AudienceDevice = { ...makeDevice('d-ghost', 3, 0.9, 0.9, 'grp-a'), status: 'disconnected' };
@@ -347,7 +347,7 @@ test('all 46 effects in EFFECT_CATALOG render dynamically and reflect custom pri
         },
       ],
     });
-    const customSamples = [50, 300, 650, 1100, 1700].map((t) =>
+    const customSamples = [0, 50, 300, 650, 1100, 1700].map((t) =>
       renderFixtureOutput(d1, [d1, d2], groups, customLighting, t),
     );
     const maxRed = Math.max(...customSamples.map((s) => s.rgb[0]));
@@ -426,3 +426,144 @@ test('stepped and cyclic colour fades interpolate smoothly over fadeTimeMs witho
   }
   assert.ok(maxFrameJump < 30, `Expected smooth continuous colour_fade frame steps, got maxJump=${maxFrameJump}`);
 });
+
+test('beat_flash respects BPM, beatStepPattern, beatFlashEvery, and beatSpreadMode across connected devices', () => {
+  const d1 = makeDevice('d1', 1, 0.0833, 0.2);
+  const d2 = makeDevice('d2', 2, 0.25, 0.2);
+  const d3 = makeDevice('d3', 3, 0.416, 0.2);
+  const d4 = makeDevice('d4', 4, 0.583, 0.2);
+  const all = [d1, d2, d3, d4];
+
+  // At 120 BPM (500ms/beat), step = 250ms in 8-step half-beat or 500ms if beatSteps=4
+  // Pattern [true, false, true, false] => Step 0 (t=20ms) flashes, Step 1 (t=520ms) does not flash!
+  const stepPatternLighting = makeBaseLighting({
+    baseColor: '#000000',
+    layers: [
+      {
+        id: 'l-beat',
+        name: 'Beat Flash',
+        type: 'beat_flash',
+        enabled: true,
+        blendMode: 'normal',
+        opacity: 1,
+        startedAtMs: 0,
+        params: createDefaultEffectParams({
+          speed: 1,
+          bpm: 120,
+          beatSteps: 4,
+          beatStepPattern: [true, false, false, false],
+          beatFlashEvery: 4,
+          beatSpreadMode: 'all',
+          width: 40,
+          palette: ['#FFFFFF', '#001133'],
+        }),
+      },
+    ],
+  });
+
+  const onStep0 = renderFixtureOutput(d1, all, groups, stepPatternLighting, 20);
+  const onStep1 = renderFixtureOutput(d1, all, groups, stepPatternLighting, 520);
+  assert.equal(onStep0.flashActive, true, 'Beat step 0 should trigger flash when enabled in pattern');
+  assert.equal(onStep1.flashActive, false, 'Beat step 1 should be off when disabled in pattern');
+  assert.ok(onStep0.rgb[0] > onStep1.rgb[0] + 100, 'Step 0 flash must be much brighter than disabled Step 1');
+
+  // Chase mode should light different devices on step 0 vs step 1
+  const chaseLighting = makeBaseLighting({
+    baseColor: '#000000',
+    layers: [
+      {
+        id: 'l-beat-chase',
+        name: 'Beat Chase',
+        type: 'beat_flash',
+        enabled: true,
+        blendMode: 'normal',
+        opacity: 1,
+        startedAtMs: 0,
+        params: createDefaultEffectParams({
+          speed: 1,
+          bpm: 120,
+          beatSteps: 4,
+          beatStepPattern: [true, true, true, true],
+          beatFlashEvery: 1,
+          beatSpreadMode: 'chase',
+          spread: 15,
+          palette: ['#FF0044', '#000000'],
+        }),
+      },
+    ],
+  });
+  const chaseStep0D1 = renderFixtureOutput(d1, all, groups, chaseLighting, 20);
+  const chaseStep0D3 = renderFixtureOutput(d3, all, groups, chaseLighting, 20);
+  assert.ok(chaseStep0D1.rgb[0] > chaseStep0D3.rgb[0] + 80, 'Chase mode at step 0 should highlight first device');
+  const chaseStep2D3 = renderFixtureOutput(d3, all, groups, chaseLighting, 1020);
+  assert.ok(chaseStep2D3.rgb[0] > 120, 'Chase mode at step 2 should advance highlight to third device');
+});
+
+test('effect editor knobs (width, size, spread, density, frequency, phaseDeg) visibly alter output across active devices', () => {
+  // Devices placed close together at default auto-join columns (0.0833 and 0.25) to confirm relative normalization works!
+  const d1 = makeDevice('d1', 1, 0.0833, 0.125);
+  const d2 = makeDevice('d2', 2, 0.25, 0.125);
+  const d3 = makeDevice('d3', 3, 0.4167, 0.125);
+  const all = [d1, d2, d3];
+
+  const makeWave = (overrides: Record<string, unknown>) =>
+    makeBaseLighting({
+      baseColor: '#000000',
+      layers: [
+        {
+          id: 'l-wave',
+          name: 'Wave',
+          type: 'wave_left_to_right',
+          enabled: true,
+          blendMode: 'normal',
+          opacity: 1,
+          startedAtMs: 0,
+          params: createDefaultEffectParams({
+            speed: 1,
+            palette: ['#00AAFF', '#000000'],
+            ...overrides,
+          }),
+        },
+      ],
+    });
+
+  // Width change: wider band should keep adjacent devices brighter when wave head is on d1
+  const narrowWave = makeWave({ width: 8, phaseDeg: 0 });
+  const wideWave = makeWave({ width: 80, phaseDeg: 0 });
+  const narrowD2 = renderFixtureOutput(d2, all, groups, narrowWave, 100);
+  const wideD2 = renderFixtureOutput(d2, all, groups, wideWave, 100);
+  assert.ok(wideD2.rgb[2] > narrowD2.rgb[2], `Wider wave should illuminate neighbor more (wide=${wideD2.rgb[2]}, narrow=${narrowD2.rgb[2]})`);
+
+  // Phase change: shifting phaseDeg by 180 changes brightness across devices
+  const phase0 = renderFixtureOutput(d1, all, groups, makeWave({ phaseDeg: 0, width: 20 }), 100);
+  const phase180 = renderFixtureOutput(d1, all, groups, makeWave({ phaseDeg: 180, width: 20 }), 100);
+  assert.notEqual(phase0.colorHex, phase180.colorHex, 'Phase knob must visibly shift wave output');
+
+  // Density & spread change on flash_random
+  const makeSparkle = (density: number, spread: number) =>
+    makeBaseLighting({
+      baseColor: '#000000',
+      layers: [
+        {
+          id: 'l-spk',
+          name: 'Sparkle',
+          type: 'flash_random',
+          enabled: true,
+          blendMode: 'normal',
+          opacity: 1,
+          startedAtMs: 0,
+          params: createDefaultEffectParams({ density, spread, palette: ['#FFFFFF', '#001122'] }),
+        },
+      ],
+    });
+  const lowDensityAvg = [0, 100, 200, 300, 400, 500].reduce(
+    (sum, t) => sum + renderFixtureOutput(d1, all, groups, makeSparkle(10, 10), t).rgb[0],
+    0,
+  );
+  const highDensityAvg = [0, 100, 200, 300, 400, 500].reduce(
+    (sum, t) => sum + renderFixtureOutput(d1, all, groups, makeSparkle(95, 90), t).rgb[0],
+    0,
+  );
+  assert.ok(highDensityAvg >= lowDensityAvg, `Higher density/spread should yield higher sparkle energy (${highDensityAvg} vs ${lowDensityAvg})`);
+});
+

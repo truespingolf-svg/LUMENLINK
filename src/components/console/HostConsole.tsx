@@ -220,6 +220,7 @@ export const HostConsole: React.FC = () => {
           <div className="flex items-center justify-center gap-3">
             <VerticalFader
               label="MASTER"
+              testId="master-fader"
               value={show.lighting.masterIntensity}
               accentColor="#F59E0B"
               onChange={(val) => host.sendHostCommand('set_master_intensity', { intensity: val })}
@@ -227,6 +228,7 @@ export const HostConsole: React.FC = () => {
             {show.groups.slice(0, 1).map((grp) => (
               <VerticalFader
                 key={grp.id}
+                testId="group-0-fader"
                 label={grp.name.slice(0, 9)}
                 value={grp.masterIntensity}
                 accentColor={grp.color}
@@ -366,6 +368,7 @@ export const HostConsole: React.FC = () => {
               {activeTab === 'cues' && (
                 <CueTimelinePanel
                   show={show}
+                  devices={host.devices}
                   mediaAssets={host.mediaAssets}
                   serverOffsetMs={host.serverOffsetMs}
                   onCommand={host.sendHostCommand}

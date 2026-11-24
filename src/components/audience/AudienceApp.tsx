@@ -167,7 +167,8 @@ export const AudienceApp: React.FC<AudienceAppProps> = ({ showIdParam }) => {
               t === 'flash_random' ||
               t === 'flash_group' ||
               t === 'flash_alternating' ||
-              t === 'flash_staggered',
+              t === 'flash_staggered' ||
+              t === 'beat_flash',
           );
 
         const dtSec = lastFrameTsRef.current ? Math.min(0.1, (ts - lastFrameTsRef.current) / 1000) : 0.016;
@@ -257,7 +258,14 @@ export const AudienceApp: React.FC<AudienceAppProps> = ({ showIdParam }) => {
             </p>
           )}
 
-          <div className="space-y-3">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              audience.joinShow(deviceNameInput.trim() || undefined);
+              requestWakeLock();
+            }}
+            className="space-y-3"
+          >
             <label className="block text-xs text-slate-400">
               <span>Optional Name / Seat Label</span>
               <input
@@ -269,18 +277,24 @@ export const AudienceApp: React.FC<AudienceAppProps> = ({ showIdParam }) => {
               />
             </label>
 
+            {audience.joinError && (
+              <div
+                role="alert"
+                className="bg-red-950/60 border border-red-500/60 rounded-lg px-3 py-2 text-xs text-red-200 text-center"
+              >
+                {audience.joinError}
+              </div>
+            )}
+
             <button
-              type="button"
-              onClick={() => {
-                audience.joinShow(deviceNameInput.trim() || undefined);
-                requestWakeLock();
-              }}
+              type="submit"
+              disabled={audience.joining}
               style={{ backgroundColor: brandColor }}
-              className="w-full min-h-[48px] rounded-lg font-display text-lg font-bold tracking-wider uppercase text-slate-950 hover:opacity-95 active:scale-[0.99] transition-transform"
+              className="w-full min-h-[48px] rounded-lg font-display text-lg font-bold tracking-wider uppercase text-slate-950 hover:opacity-95 active:scale-[0.99] transition-transform disabled:opacity-70 cursor-pointer"
             >
-              JOIN SHOW
+              {audience.joining ? 'JOINING SHOW...' : 'JOIN SHOW'}
             </button>
-          </div>
+          </form>
 
           <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
             <Wifi className="w-3.5 h-3.5" />
