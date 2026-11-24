@@ -28,18 +28,66 @@ const validHostTokens = new Set<string>();
 
 // Optional host passcode if configured in environment
 const HOST_PASSCODE = process.env.HOST_PASSCODE || '';
+const HOST_SECRET_FILE = path.join(DATA_DIR, '.host-secret');
+
+function loadOrCreateHostSecret(): string {
+  try {
+    if (fs.existsSync(HOST_SECRET_FILE)) {
+      const existing = fs.readFileSync(HOST_SECRET_FILE, 'utf-8').trim();
+      if (existing.length >= 16) return existing;
+    }
+    const created = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(HOST_SECRET_FILE, created, 'utf-8');
+    return created;
+  } catch {
+    return crypto
+      .createHash('sha256')
+      .update(`lumenlink:${HOST_PASSCODE || 'open'}:${process.env.APP_URL || 'local'}`)
+      .digest('hex');
+  }
+}
+
+const HOST_SIGNING_SECRET = loadOrCreateHostSecret();
+
+function signTokenPayload(payload: string): string {
+  return crypto
+    .createHmac('sha256', `${HOST_SIGNING_SECRET}:${HOST_PASSCODE}`)
+    .update(payload)
+    .digest('hex');
+}
 
 function issueHostToken(): string {
-  const token = crypto.randomBytes(24).toString('hex');
+  const payload = `${Date.now().toString(36)}.${crypto.randomBytes(12).toString('hex')}`;
+  const sig = signTokenPayload(payload);
+  const token = `${payload}.${sig}`;
   validHostTokens.add(token);
   return token;
+}
+
+function isValidHostToken(token: string): boolean {
+  if (!token) return false;
+  if (validHostTokens.has(token)) return true;
+  const parts = token.split('.');
+  if (parts.length !== 3) return false;
+  const payload = `${parts[0]}.${parts[1]}`;
+  const expected = signTokenPayload(payload);
+  try {
+    const a = Buffer.from(parts[2], 'hex');
+    const b = Buffer.from(expected, 'hex');
+    if (a.length !== b.length || a.length === 0) return false;
+    const valid = crypto.timingSafeEqual(a, b);
+    if (valid) validHostTokens.add(token);
+    return valid;
+  } catch {
+    return false;
+  }
 }
 
 function isHostAuthorized(req: Request): boolean {
   const auth = req.headers.authorization;
   if (!auth || !auth.startsWith('Bearer ')) return false;
   const token = auth.slice(7).trim();
-  return validHostTokens.has(token);
+  return isValidHostToken(token);
 }
 
 function requireHostAuth(req: Request, res: Response, next: NextFunction): void {
@@ -150,10 +198,13 @@ async function startServer(): Promise<void> {
     const protocol = fwdProto.includes('https') || req.protocol === 'https' ? 'https' : 'http';
     const hostHeader = String(req.headers['x-forwarded-host'] || req.headers.host || `localhost:${PORT}`);
     const requestOrigin = `${protocol}://${hostHeader}`.replace(/\/$/, '');
+    const isRequestLocal = /^https?:\/\/(localhost|127\.|192\.168\.|10\.)/i.test(requestOrigin);
+    const isRequestDev = /^https?:\/\/ais-dev-/i.test(requestOrigin);
     const envPublic = process.env.APP_URL && process.env.APP_URL !== 'MY_APP_URL'
       ? process.env.APP_URL.replace(/\/$/, '')
       : '';
-    const candidatePublic = envPublic || requestOrigin;
+    // Prefer the real live published requestOrigin over APP_URL (which may still point to ais-dev in deployed containers)
+    const candidatePublic = !isRequestLocal && !isRequestDev ? requestOrigin : (envPublic || requestOrigin);
     const urlInfo = deriveSharedPreviewUrl(candidatePublic);
     const lanAddresses = getLanIPv4Addresses();
     res.json({
@@ -530,7 +581,7 @@ async function startServer(): Promise<void> {
 
       if (msg.type === 'register_host') {
         const token = msg.hostToken || '';
-        if (!validHostTokens.has(token)) {
+        if (!isValidHostToken(token)) {
           sendWs(ws, { type: 'error', serverTimeMs: nowMs, message: 'Unauthorized host session' });
           return;
         }
@@ -624,7 +675,7 @@ async function startServer(): Promise<void> {
       }
 
       if (msg.type === 'host_command') {
-        if (!clientMeta || clientMeta.role !== 'host' || !clientMeta.hostToken || !validHostTokens.has(clientMeta.hostToken)) {
+        if (!clientMeta || clientMeta.role !== 'host' || !clientMeta.hostToken || !isValidHostToken(clientMeta.hostToken)) {
           sendWs(ws, { type: 'error', serverTimeMs: nowMs, message: 'Unauthorized command' });
           return;
         }

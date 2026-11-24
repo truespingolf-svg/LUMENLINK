@@ -70,6 +70,13 @@ test('resolvePublicJoinBaseUrl exclusively uses shared public URLs and ignores s
     }),
     'https://stage.example.com',
   );
+  assert.equal(
+    resolvePublicJoinBaseUrl({
+      publicUrl: 'https://ais-dev-xyz.europe-west3.run.app',
+      fallbackOrigin: 'https://lumenlink-live-123.run.app',
+    }),
+    'https://lumenlink-live-123.run.app',
+  );
 });
 
 test('classifyJoinUrlProbe classifies 200, 404 ais-pre blank page, and 302 auth redirect', () => {

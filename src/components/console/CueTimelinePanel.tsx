@@ -1,12 +1,16 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Copy,
+  ArrowDown,
+  ArrowUp,
+  CopyPlus,
   Pause,
   Play,
   Plus,
   Repeat,
+  RotateCcw,
   SkipBack,
   SkipForward,
+  Sliders,
   Square,
   Trash2,
 } from 'lucide-react';
@@ -20,10 +24,12 @@ import {
   TransitionType,
 } from '../../shared/types';
 import { EFFECT_CATALOG } from '../../engine/effects';
+import { hexToRgb } from '../../engine/colors';
 
 interface CueTimelinePanelProps {
   show: ShowFile;
   mediaAssets: MediaAsset[];
+  serverOffsetMs?: number;
   onCommand: (action: string, payload?: Record<string, unknown>) => void;
 }
 
@@ -35,30 +41,70 @@ const TRACKS: Array<{ id: TimelineBlock['track']; label: string; color: string }
   { id: 'intensity', label: 'Intensity', color: '#10B981' },
 ];
 
+const BLANK_CUE_DRAFT: Partial<CueItem> = {
+  name: 'New Lighting Cue',
+  colour: '#0066FF',
+  secondaryColour: '#001133',
+  effectType: 'solid',
+  intensity: 100,
+  durationMs: 4000,
+  fadeInMs: 600,
+  fadeOutMs: 400,
+  delayMs: 0,
+  targetGroupId: 'all',
+  mediaId: null,
+  transitionType: 'ease_in_out',
+  autoFollow: true,
+};
+
+function formatSec(ms: number): string {
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 export const CueTimelinePanel: React.FC<CueTimelinePanelProps> = ({
   show,
   mediaAssets,
+  serverOffsetMs = 0,
   onCommand,
 }) => {
   const [subView, setSubView] = useState<'cues' | 'timeline'>('cues');
   const [gotoNum, setGotoNum] = useState('');
-  const [copiedCue, setCopiedCue] = useState<CueItem | null>(null);
+  const [editingCueId, setEditingCueId] = useState<string | null>(null);
+  const [cueDraft, setCueDraft] = useState<Partial<CueItem>>(BLANK_CUE_DRAFT);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now() + serverOffsetMs);
 
-  const [newCue, setNewCue] = useState<Partial<CueItem>>({
-    name: 'New Lighting Cue',
-    colour: '#0066FF',
-    secondaryColour: '#001133',
-    effectType: 'solid',
-    intensity: 100,
-    durationMs: 4000,
-    fadeInMs: 600,
-    fadeOutMs: 400,
-    delayMs: 0,
-    targetGroupId: 'all',
-    mediaId: null,
-    transitionType: 'ease_in_out',
-    autoFollow: true,
-  });
+  const activeCueIndex = show.playback.activeCueIndex;
+  const activeCue =
+    activeCueIndex >= 0 && activeCueIndex < show.cues.length
+      ? show.cues[activeCueIndex]
+      : null;
+  const nextCue =
+    show.cues.length > 0
+      ? show.cues[(Math.max(-1, activeCueIndex) + 1) % show.cues.length]
+      : null;
+
+  const hasTimedAutoFollow =
+    show.playback.status === 'playing' &&
+    Boolean(activeCue?.autoFollow && (activeCue?.durationMs || 0) > 0);
+
+  useEffect(() => {
+    setNowMs(Date.now() + serverOffsetMs);
+    if (!hasTimedAutoFollow && !show.playback.timelinePlaying) return;
+    const id = window.setInterval(() => {
+      setNowMs(Date.now() + serverOffsetMs);
+    }, 80);
+    return () => window.clearInterval(id);
+  }, [hasTimedAutoFollow, show.playback.timelinePlaying, serverOffsetMs, show.playback.cueStartedAtMs]);
+
+  const cueProgress = useMemo(() => {
+    if (!activeCue || !activeCue.autoFollow || activeCue.durationMs <= 0) {
+      return { ratio: 0, elapsedMs: 0, remainingMs: 0 };
+    }
+    const elapsedMs = Math.max(0, nowMs - show.playback.cueStartedAtMs);
+    const ratio = Math.min(1, elapsedMs / activeCue.durationMs);
+    const remainingMs = Math.max(0, activeCue.durationMs - elapsedMs);
+    return { ratio, elapsedMs, remainingMs };
+  }, [activeCue, nowMs, show.playback.cueStartedAtMs]);
 
   const activeTimeline: TimelineSequence = show.timelines[0] || {
     id: 'tl-main',
@@ -88,29 +134,48 @@ export const CueTimelinePanel: React.FC<CueTimelinePanelProps> = ({
     mediaId: mediaAssets[0]?.id || '',
   });
 
-  const handleAddCue = () => {
+  const selectCueForInspector = (cue: CueItem) => {
+    setEditingCueId(cue.id);
+    setCueDraft({ ...cue });
+  };
+
+  const resetToNewCueMode = () => {
+    setEditingCueId(null);
+    setCueDraft({
+      ...BLANK_CUE_DRAFT,
+      name: `Cue ${show.cues.length + 1}`,
+    });
+  };
+
+  const handleSaveCue = () => {
+    const existing = editingCueId ? show.cues.find((c) => c.id === editingCueId) : null;
     const maxNum = show.cues.reduce((m, c) => Math.max(m, c.cueNumber), 0);
     const cue: CueItem = {
-      id: `cue-${Math.random().toString(36).slice(2, 7)}`,
-      cueNumber: maxNum + 1,
-      name: newCue.name?.trim() || `Cue ${maxNum + 1}`,
-      colour: newCue.colour || '#0066FF',
-      secondaryColour: newCue.secondaryColour,
-      effectType: (newCue.effectType as EffectType) || 'solid',
+      id: existing ? existing.id : `cue-${Math.random().toString(36).slice(2, 7)}`,
+      cueNumber: existing ? existing.cueNumber : maxNum + 1,
+      name: cueDraft.name?.trim() || `Cue ${existing ? existing.cueNumber : maxNum + 1}`,
+      colour: cueDraft.colour || '#0066FF',
+      secondaryColour: cueDraft.secondaryColour || '#000000',
+      effectType: (cueDraft.effectType as EffectType) || 'solid',
       effectParams: {
-        palette: [newCue.colour || '#0066FF', newCue.secondaryColour || '#000000'],
+        ...(existing?.effectParams || {}),
+        palette: [cueDraft.colour || '#0066FF', cueDraft.secondaryColour || '#000000'],
       },
-      intensity: Number(newCue.intensity ?? 100),
-      durationMs: Number(newCue.durationMs ?? 4000),
-      fadeInMs: Number(newCue.fadeInMs ?? 500),
-      fadeOutMs: Number(newCue.fadeOutMs ?? 400),
-      delayMs: Number(newCue.delayMs ?? 0),
-      targetGroupId: newCue.targetGroupId || 'all',
-      mediaId: newCue.mediaId || null,
-      transitionType: (newCue.transitionType as TransitionType) || 'ease_in_out',
-      autoFollow: Boolean(newCue.autoFollow),
+      intensity: Math.max(0, Math.min(100, Number(cueDraft.intensity ?? 100))),
+      durationMs: Math.max(0, Number(cueDraft.durationMs ?? 0)),
+      fadeInMs: Math.max(0, Number(cueDraft.fadeInMs ?? 500)),
+      fadeOutMs: Math.max(0, Number(cueDraft.fadeOutMs ?? 400)),
+      delayMs: Math.max(0, Number(cueDraft.delayMs ?? 0)),
+      targetGroupId: cueDraft.targetGroupId || 'all',
+      mediaId: cueDraft.mediaId || null,
+      transitionType: (cueDraft.transitionType as TransitionType) || 'ease_in_out',
+      autoFollow: Boolean(cueDraft.autoFollow),
     };
     onCommand('upsert_cue', { cue });
+    if (!existing) {
+      setEditingCueId(cue.id);
+      setCueDraft(cue);
+    }
   };
 
   const handleAddBlock = () => {
@@ -150,184 +215,321 @@ export const CueTimelinePanel: React.FC<CueTimelinePanelProps> = ({
     onCommand('save_timeline', { timeline: nextTl });
   };
 
+  const statusTone =
+    show.playback.status === 'playing'
+      ? 'text-emerald-400'
+      : show.playback.status === 'paused'
+        ? 'text-amber-400'
+        : 'text-slate-400';
+
+  const statusText =
+    show.playback.status === 'playing'
+      ? 'RUNNING'
+      : show.playback.status === 'paused'
+        ? 'PAUSED'
+        : 'STANDBY';
+
+  const draftPrimary = cueDraft.colour || '#0066FF';
+  const draftSecondary = cueDraft.secondaryColour || '#001133';
+  const draftIntensity = Number(cueDraft.intensity ?? 100);
+  const intensityTrackBg = `linear-gradient(90deg, #F59E0B 0%, #F59E0B ${draftIntensity}%, #07090D ${draftIntensity}%, #07090D 100%)`;
+
   return (
     <div className="flex flex-col gap-4">
-      {/* Transport & Mode Header */}
-      <div className="bg-[#12151B] border border-[#232934] rounded p-3 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setSubView('cues')}
-            className={`px-3 py-1.5 rounded text-xs font-semibold ${
-              subView === 'cues'
-                ? 'bg-amber-500 text-slate-950'
-                : 'bg-[#1A1F28] text-slate-300 hover:bg-[#232A36]'
-            }`}
-          >
-            Cue List &amp; Playback
-          </button>
-          <button
-            type="button"
-            onClick={() => setSubView('timeline')}
-            className={`px-3 py-1.5 rounded text-xs font-semibold ${
-              subView === 'timeline'
-                ? 'bg-amber-500 text-slate-950'
-                : 'bg-[#1A1F28] text-slate-300 hover:bg-[#232A36]'
-            }`}
-          >
-            Multi-Track Timeline Editor
-          </button>
-        </div>
-
-        {/* Cue Transport Deck */}
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onCommand('cue_back')}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs bg-[#1A1F28] border border-[#2B3342] text-slate-200 hover:bg-[#232A36]"
-          >
-            <SkipBack className="w-3.5 h-3.5" />
-            <span>BACK</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() =>
-              subView === 'timeline'
-                ? onCommand('timeline_play', { timelineId: activeTimeline.id })
-                : onCommand('cue_go')
-            }
-            className="flex items-center gap-1.5 px-4 py-1.5 rounded text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-500"
-          >
-            <Play className="w-3.5 h-3.5" />
-            <span>GO</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() =>
-              subView === 'timeline' ? onCommand('timeline_pause') : onCommand('cue_pause')
-            }
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs bg-[#1A1F28] border border-[#2B3342] text-amber-300 hover:bg-[#232A36]"
-          >
-            <Pause className="w-3.5 h-3.5" />
-            <span>PAUSE</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() =>
-              subView === 'timeline' ? onCommand('timeline_stop') : onCommand('cue_stop')
-            }
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs bg-[#1A1F28] border border-[#2B3342] text-red-300 hover:bg-[#232A36]"
-          >
-            <Square className="w-3.5 h-3.5" />
-            <span>STOP</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onCommand('cue_next')}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs bg-[#1A1F28] border border-[#2B3342] text-slate-200 hover:bg-[#232A36]"
-          >
-            <span>NEXT CUE</span>
-            <SkipForward className="w-3.5 h-3.5" />
-          </button>
-
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const num = Number(gotoNum);
-              if (num > 0) {
-                onCommand('cue_goto', { cueNumber: num });
-                setGotoNum('');
-              }
-            }}
-            className="flex items-center gap-1"
-          >
-            <input
-              type="number"
-              aria-label="Go to cue number"
-              placeholder="Cue #"
-              value={gotoNum}
-              onChange={(e) => setGotoNum(e.target.value)}
-              className="w-16 bg-[#090B0E] border border-[#2A313E] rounded px-2 py-1 text-xs font-mono-tabular text-slate-100"
-            />
+      {/* Master Playback Deck */}
+      <div className="console-panel rounded-md p-3.5 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Segmented Console Mode Switch */}
+          <div className="console-well p-1 rounded flex items-center gap-1">
             <button
-              type="submit"
-              className="px-2 py-1 rounded text-xs bg-[#1A1F28] border border-[#2B3342] text-slate-200"
+              type="button"
+              onClick={() => setSubView('cues')}
+              className={`px-3 py-1.5 rounded text-xs transition-colors ${
+                subView === 'cues'
+                  ? 'console-btn-amber font-semibold'
+                  : 'text-slate-300 hover:text-white font-medium'
+              }`}
             >
-              GO TO
+              Cue Stack
             </button>
-          </form>
+            <button
+              type="button"
+              onClick={() => setSubView('timeline')}
+              className={`px-3 py-1.5 rounded text-xs transition-colors ${
+                subView === 'timeline'
+                  ? 'console-btn-amber font-semibold'
+                  : 'text-slate-300 hover:text-white font-medium'
+              }`}
+            >
+              Timeline Sequencer
+            </button>
+          </div>
 
-          <button
-            type="button"
-            onClick={() => onCommand('release_all')}
-            className="px-2.5 py-1.5 rounded text-xs bg-red-950/60 border border-red-800/60 text-red-200"
-          >
-            RELEASE ALL
-          </button>
+          {/* Unboxed Telemetry Readout */}
+          <div className="flex flex-wrap items-center gap-4 text-xs font-mono-tabular">
+            <div className="flex items-center gap-2">
+              <span className="text-slate-500 uppercase tracking-wider text-[10px]">Deck</span>
+              <span className={`font-semibold tracking-wider ${statusTone}`}>{statusText}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-slate-500 uppercase tracking-wider text-[10px]">Active</span>
+              <span className="text-slate-100 font-semibold">
+                {activeCue
+                  ? `${String(activeCue.cueNumber).padStart(2, '0')} · ${activeCue.name}`
+                  : 'None'}
+              </span>
+            </div>
+            {nextCue && (
+              <div className="hidden md:flex items-center gap-2 text-slate-400">
+                <span className="text-slate-500 uppercase tracking-wider text-[10px]">Next</span>
+                <span>
+                  {String(nextCue.cueNumber).padStart(2, '0')} · {nextCue.name}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Hardware Transport Keycaps */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => onCommand('cue_back')}
+              className="console-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium text-slate-200"
+              title="Previous Cue"
+            >
+              <SkipBack className="w-3.5 h-3.5" />
+              <span>BACK</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                subView === 'timeline'
+                  ? onCommand('timeline_play', { timelineId: activeTimeline.id })
+                  : onCommand('cue_go')
+              }
+              className="console-btn-emerald flex items-center gap-1.5 px-4 py-1.5 rounded text-xs font-bold tracking-wider"
+              title="Execute Current / Next Cue"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              <span>GO</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                subView === 'timeline' ? onCommand('timeline_pause') : onCommand('cue_pause')
+              }
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold ${
+                show.playback.status === 'paused'
+                  ? 'console-btn-amber'
+                  : 'console-btn text-amber-300'
+              }`}
+            >
+              <Pause className="w-3.5 h-3.5" />
+              <span>{show.playback.status === 'paused' ? 'RESUME' : 'PAUSE'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                subView === 'timeline' ? onCommand('timeline_stop') : onCommand('cue_stop')
+              }
+              className="console-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium text-red-300"
+            >
+              <Square className="w-3.5 h-3.5" />
+              <span>STOP</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onCommand('cue_next')}
+              className="console-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-medium text-slate-200"
+            >
+              <span>NEXT</span>
+              <SkipForward className="w-3.5 h-3.5" />
+            </button>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const num = Number(gotoNum);
+                if (num > 0) {
+                  onCommand('cue_goto', { cueNumber: num });
+                  setGotoNum('');
+                }
+              }}
+              className="flex items-center gap-1 ml-1"
+            >
+              <input
+                type="number"
+                aria-label="Go to cue number"
+                placeholder="#"
+                value={gotoNum}
+                onChange={(e) => setGotoNum(e.target.value)}
+                className="w-12 console-well rounded px-2 py-1.5 text-xs font-mono-tabular text-slate-100 focus:outline-none focus:border-amber-400"
+              />
+              <button
+                type="submit"
+                className="console-btn px-2.5 py-1.5 rounded text-xs font-medium text-slate-200"
+              >
+                GO TO
+              </button>
+            </form>
+
+            <button
+              type="button"
+              onClick={() => onCommand('release_all')}
+              className="console-btn px-2.5 py-1.5 rounded text-xs font-semibold text-red-300 border-red-900/60 hover:border-red-500/70"
+            >
+              RELEASE ALL
+            </button>
+          </div>
         </div>
+
+        {/* Live Cue Timing / Auto-Follow Bar */}
+        {subView === 'cues' && activeCue && (
+          <div className="console-well rounded px-3 py-2 flex items-center gap-3">
+            <span
+              className="w-3 h-3 rounded-xs shrink-0 border border-white/25"
+              style={{ backgroundColor: activeCue.colour }}
+            />
+            <span className="text-[11px] font-mono-tabular text-slate-300 shrink-0">
+              Cue {String(activeCue.cueNumber).padStart(2, '0')}
+            </span>
+            <div className="flex-1 h-1.5 bg-[#12161E] rounded-full overflow-hidden">
+              <div
+                className={`h-full transition-[width] duration-75 ${
+                  hasTimedAutoFollow ? 'bg-emerald-400' : 'bg-amber-400/70'
+                }`}
+                style={{
+                  width: hasTimedAutoFollow ? `${Math.round(cueProgress.ratio * 100)}%` : '100%',
+                }}
+              />
+            </div>
+            <span className="text-[11px] font-mono-tabular text-slate-300 shrink-0">
+              {hasTimedAutoFollow
+                ? `Auto-follow in ${formatSec(cueProgress.remainingMs)}`
+                : activeCue.durationMs === 0
+                  ? 'Manual Hold (press GO for next)'
+                  : `Hold ${formatSec(activeCue.durationMs)} · Manual`}
+            </span>
+          </div>
+        )}
       </div>
 
       {subView === 'cues' ? (
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-          {/* Cue List Table */}
-          <div className="xl:col-span-8 bg-[#12151B] border border-[#232934] rounded p-3 overflow-x-auto">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="font-display text-sm font-semibold tracking-wider uppercase text-slate-100">
-                Show Cue List ({show.cues.length} Cues)
-              </h3>
-              <span className="text-xs font-mono-tabular text-slate-400">
-                Status: {show.playback.status.toUpperCase()}
-                {show.playback.activeCueIndex >= 0
-                  ? ` · Active Cue #${show.cues[show.playback.activeCueIndex]?.cueNumber ?? ''}`
-                  : ''}
-              </span>
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+          {/* Pro Show Cue Stack Sheet */}
+          <div className="xl:col-span-8 console-panel rounded-md overflow-hidden">
+            <div className="px-4 py-3 border-b border-[#222833] flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-baseline gap-3">
+                <h3 className="font-display text-sm font-semibold tracking-wider uppercase text-slate-100">
+                  Show Cue Stack
+                </h3>
+                <span className="text-xs font-mono-tabular text-slate-400">
+                  {show.cues.length} {show.cues.length === 1 ? 'Cue' : 'Cues'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={resetToNewCueMode}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold ${
+                  editingCueId === null
+                    ? 'console-btn-amber'
+                    : 'console-btn text-slate-200'
+                }`}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>New Cue</span>
+              </button>
             </div>
 
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-[#232934] text-slate-400">
-                  <th className="py-2 px-2">Cue</th>
-                  <th className="py-2 px-2">Name</th>
-                  <th className="py-2 px-2">Colour</th>
-                  <th className="py-2 px-2">Effect</th>
-                  <th className="py-2 px-2">Int</th>
-                  <th className="py-2 px-2">Fade In</th>
-                  <th className="py-2 px-2">Duration</th>
-                  <th className="py-2 px-2">Follow</th>
-                  <th className="py-2 px-2">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
+            {show.cues.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-400 space-y-2">
+                <p className="text-slate-200 font-medium">No cues in this show yet</p>
+                <p>Configure a look in the Cue Inspector on the right and click Add Cue to Stack.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-[#1A1F28]">
                 {show.cues.map((cue, idx) => {
                   const isActive = show.playback.activeCueId === cue.id;
+                  const isSelected = editingCueId === cue.id;
+                  const fxLabel =
+                    EFFECT_CATALOG.find((fx) => fx.type === cue.effectType)?.label ||
+                    cue.effectType;
+                  const grpName =
+                    cue.targetGroupId === 'all'
+                      ? 'All Fixtures'
+                      : show.groups.find((g) => g.id === cue.targetGroupId)?.name || 'Group';
+
                   return (
-                    <tr
+                    <div
                       key={cue.id}
-                      className={`border-b border-[#1A1F28] ${
-                        isActive ? 'bg-emerald-500/15' : 'hover:bg-[#171B23]'
+                      data-testid={`cue-row-${cue.cueNumber}`}
+                      onClick={() => selectCueForInspector(cue)}
+                      className={`px-3.5 py-3 flex flex-wrap items-center justify-between gap-2.5 cursor-pointer transition-colors ${
+                        isActive
+                          ? 'bg-emerald-500/12'
+                          : isSelected
+                            ? 'bg-amber-500/10'
+                            : 'hover:bg-[#171C25]'
                       }`}
                     >
-                      <td className="py-2 px-2 font-mono-tabular font-bold text-amber-400">
-                        {cue.cueNumber}
-                      </td>
-                      <td className="py-2 px-2 font-medium text-slate-100">{cue.name}</td>
-                      <td className="py-2 px-2">
+                      {/* Left: Cue #, Look Swatch, Name & Metadata */}
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className="flex items-center gap-1 w-9 shrink-0 font-mono-tabular font-bold text-xs">
+                          {isActive ? (
+                            <Play className="w-3 h-3 text-emerald-400 fill-current shrink-0" />
+                          ) : (
+                            <span className="w-3 shrink-0" />
+                          )}
+                          <span className={isActive ? 'text-emerald-300' : 'text-amber-400'}>
+                            {String(cue.cueNumber).padStart(2, '0')}
+                          </span>
+                        </div>
+
                         <span
-                          className="inline-block w-4 h-4 rounded-sm border border-slate-600 align-middle"
-                          style={{ backgroundColor: cue.colour }}
+                          className="w-7 h-7 rounded-sm border border-white/25 shrink-0 shadow-inner"
+                          style={{
+                            background: `linear-gradient(135deg, ${cue.colour} 0%, ${
+                              cue.secondaryColour || cue.colour
+                            } 100%)`,
+                          }}
+                          title={`${cue.colour}${cue.secondaryColour ? ` → ${cue.secondaryColour}` : ''}`}
                         />
-                      </td>
-                      <td className="py-2 px-2 text-slate-300">{cue.effectType}</td>
-                      <td className="py-2 px-2 font-mono-tabular text-slate-300">{cue.intensity}%</td>
-                      <td className="py-2 px-2 font-mono-tabular text-slate-300">{cue.fadeInMs}ms</td>
-                      <td className="py-2 px-2 font-mono-tabular text-slate-300">
-                        {cue.durationMs === 0 ? 'Hold' : `${cue.durationMs}ms`}
-                      </td>
-                      <td className="py-2 px-2">
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="font-semibold text-xs text-slate-100 truncate">
+                              {cue.name}
+                            </span>
+                            {isActive && (
+                              <span className="text-[10px] font-mono-tabular font-semibold text-emerald-400 uppercase tracking-wider shrink-0">
+                                LIVE
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-slate-400 font-mono-tabular">
+                            <span className="text-slate-300 font-sans">{fxLabel}</span>
+                            <span>·</span>
+                            <span>{cue.intensity}%</span>
+                            <span>·</span>
+                            <span>
+                              Fade {formatSec(cue.fadeInMs)} /{' '}
+                              {cue.durationMs === 0 ? 'Hold' : formatSec(cue.durationMs)}
+                            </span>
+                            <span className="hidden sm:inline">·</span>
+                            <span className="hidden sm:inline font-sans">{grpName}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right: Follow Toggle + GO + Reorder/Duplicate/Delete Controls */}
+                      <div
+                        className="flex items-center gap-1 shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <button
                           type="button"
                           onClick={() =>
@@ -335,114 +537,166 @@ export const CueTimelinePanel: React.FC<CueTimelinePanelProps> = ({
                               cue: { ...cue, autoFollow: !cue.autoFollow },
                             })
                           }
-                          className={`px-2 py-0.5 rounded text-[11px] font-medium ${
+                          className={`px-2 py-1 rounded text-[11px] font-medium mr-0.5 ${
                             cue.autoFollow
-                              ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-700'
-                              : 'bg-[#1A1F28] text-slate-400'
+                              ? 'console-btn-emerald font-semibold'
+                              : 'console-btn text-slate-300'
                           }`}
                         >
                           {cue.autoFollow ? 'Auto' : 'Manual'}
                         </button>
-                      </td>
-                      <td className="py-2 px-2">
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => onCommand('cue_go', { cueIndex: idx })}
-                            className="px-2 py-0.5 rounded bg-emerald-600 text-white font-semibold text-[11px]"
-                          >
-                            GO
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Copy cue ${cue.name}`}
-                            onClick={() => setCopiedCue(cue)}
-                            className="p-1 text-slate-400 hover:text-slate-100"
-                            title="Copy Cue"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Delete cue ${cue.name}`}
-                            onClick={() => onCommand('delete_cue', { cueId: cue.id })}
-                            className="p-1 text-slate-500 hover:text-red-400"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                        <button
+                          type="button"
+                          onClick={() => onCommand('cue_go', { cueIndex: idx })}
+                          className="console-btn-emerald px-2.5 py-1 rounded font-semibold text-[11px]"
+                          title={`Fire Cue ${cue.cueNumber}`}
+                        >
+                          GO
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Move cue ${cue.name} up`}
+                          disabled={idx === 0}
+                          onClick={() =>
+                            onCommand('reorder_cue', { cueId: cue.id, direction: 'up' })
+                          }
+                          className="console-btn p-1 rounded text-slate-300 disabled:opacity-35"
+                          title="Move Up"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Move cue ${cue.name} down`}
+                          disabled={idx === show.cues.length - 1}
+                          onClick={() =>
+                            onCommand('reorder_cue', { cueId: cue.id, direction: 'down' })
+                          }
+                          className="console-btn p-1 rounded text-slate-300 disabled:opacity-35"
+                          title="Move Down"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Duplicate cue ${cue.name}`}
+                          onClick={() => onCommand('duplicate_cue', { cueId: cue.id })}
+                          className="console-btn p-1 rounded text-slate-300"
+                          title="Duplicate Cue"
+                        >
+                          <CopyPlus className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Delete cue ${cue.name}`}
+                          onClick={() => {
+                            if (editingCueId === cue.id) {
+                              resetToNewCueMode();
+                            }
+                            onCommand('delete_cue', { cueId: cue.id });
+                          }}
+                          className="console-btn p-1 rounded text-slate-400 hover:text-red-400"
+                          title="Delete Cue"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
+              </div>
+            )}
           </div>
 
-          {/* Add Cue Form */}
-          <div className="xl:col-span-4 bg-[#12151B] border border-[#232934] rounded p-4 space-y-3 text-xs">
-            <div className="flex items-center justify-between">
-              <h3 className="font-display text-sm font-semibold tracking-wider uppercase text-slate-100">
-                Create New Cue
-              </h3>
-              {copiedCue && (
+          {/* Cue Inspector & Designer */}
+          <div className="xl:col-span-4 console-panel rounded-md p-4 space-y-3.5 text-xs">
+            <div className="flex items-center justify-between gap-2 border-b border-[#222833] pb-2.5">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-amber-400" />
+                <h3 className="font-display text-sm font-semibold tracking-wider uppercase text-slate-100">
+                  {editingCueId ? 'Cue Inspector' : 'New Cue Designer'}
+                </h3>
+              </div>
+              {editingCueId && (
                 <button
                   type="button"
-                  onClick={() => {
-                    const maxNum = show.cues.reduce((m, c) => Math.max(m, c.cueNumber), 0);
-                    onCommand('upsert_cue', {
-                      cue: {
-                        ...copiedCue,
-                        id: `cue-${Math.random().toString(36).slice(2, 7)}`,
-                        cueNumber: maxNum + 1,
-                        name: `${copiedCue.name} (Copy)`,
-                      },
-                    });
-                  }}
-                  className="text-amber-400 hover:underline"
+                  onClick={resetToNewCueMode}
+                  className="console-btn flex items-center gap-1 px-2 py-1 rounded text-[11px] text-amber-300"
                 >
-                  Paste Copied Cue
+                  <RotateCcw className="w-3 h-3" />
+                  <span>New Cue</span>
                 </button>
               )}
+            </div>
+
+            {/* Live Look Preview Strip */}
+            <div className="console-well rounded p-2.5 space-y-1.5">
+              <div
+                className="h-7 rounded border border-white/15 shadow-inner"
+                style={{
+                  background: `linear-gradient(90deg, ${draftPrimary} 0%, ${draftSecondary} 100%)`,
+                }}
+              />
+              <div className="flex items-center justify-between text-[10px] font-mono-tabular text-slate-400">
+                <span>
+                  {draftPrimary.toUpperCase()} → {draftSecondary.toUpperCase()}
+                </span>
+                <span>
+                  {EFFECT_CATALOG.find((fx) => fx.type === cueDraft.effectType)?.label || 'Solid'}
+                </span>
+              </div>
             </div>
 
             <label className="flex flex-col gap-1 text-slate-300">
               <span>Cue Name</span>
               <input
                 type="text"
-                value={newCue.name || ''}
-                onChange={(e) => setNewCue({ ...newCue, name: e.target.value })}
-                className="bg-[#090B0E] border border-[#2A313E] rounded px-2.5 py-1.5 text-slate-100"
+                value={cueDraft.name || ''}
+                onChange={(e) => setCueDraft({ ...cueDraft, name: e.target.value })}
+                className="console-well rounded px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-amber-400"
               />
             </label>
 
-            <div className="grid grid-cols-2 gap-2">
+            {/* Colour Wells */}
+            <div className="grid grid-cols-2 gap-2.5">
               <label className="flex flex-col gap-1 text-slate-300">
                 <span>Primary Colour</span>
-                <input
-                  type="color"
-                  value={newCue.colour || '#0066FF'}
-                  onChange={(e) => setNewCue({ ...newCue, colour: e.target.value })}
-                  className="w-full h-8 rounded bg-transparent border border-[#2A313E] cursor-pointer"
-                />
+                <div className="console-well rounded p-1.5 flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={draftPrimary}
+                    onChange={(e) => setCueDraft({ ...cueDraft, colour: e.target.value })}
+                    className="w-8 h-7 rounded bg-transparent border border-[#2A313E] cursor-pointer shrink-0"
+                  />
+                  <span className="font-mono-tabular text-[11px] text-slate-200 uppercase truncate">
+                    {draftPrimary}
+                  </span>
+                </div>
               </label>
               <label className="flex flex-col gap-1 text-slate-300">
                 <span>Secondary Colour</span>
-                <input
-                  type="color"
-                  value={newCue.secondaryColour || '#000000'}
-                  onChange={(e) => setNewCue({ ...newCue, secondaryColour: e.target.value })}
-                  className="w-full h-8 rounded bg-transparent border border-[#2A313E] cursor-pointer"
-                />
+                <div className="console-well rounded p-1.5 flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={draftSecondary}
+                    onChange={(e) => setCueDraft({ ...cueDraft, secondaryColour: e.target.value })}
+                    className="w-8 h-7 rounded bg-transparent border border-[#2A313E] cursor-pointer shrink-0"
+                  />
+                  <span className="font-mono-tabular text-[11px] text-slate-200 uppercase truncate">
+                    {draftSecondary}
+                  </span>
+                </div>
               </label>
             </div>
 
             <label className="flex flex-col gap-1 text-slate-300">
-              <span>Effect Type</span>
+              <span>Effect Engine</span>
               <select
-                value={newCue.effectType}
-                onChange={(e) => setNewCue({ ...newCue, effectType: e.target.value as EffectType })}
-                className="bg-[#090B0E] border border-[#2A313E] rounded px-2 py-1.5 text-slate-100"
+                value={cueDraft.effectType}
+                onChange={(e) =>
+                  setCueDraft({ ...cueDraft, effectType: e.target.value as EffectType })
+                }
+                className="console-well rounded px-2.5 py-1.5 text-slate-100 focus:outline-none focus:border-amber-400"
               >
                 {EFFECT_CATALOG.map((fx) => (
                   <option key={fx.type} value={fx.type}>
@@ -452,48 +706,78 @@ export const CueTimelinePanel: React.FC<CueTimelinePanelProps> = ({
               </select>
             </label>
 
-            <div className="grid grid-cols-2 gap-2">
-              <label className="flex flex-col gap-1 text-slate-300">
-                <span>Intensity (%)</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={newCue.intensity ?? 100}
-                  onChange={(e) => setNewCue({ ...newCue, intensity: Number(e.target.value) })}
-                  className="bg-[#090B0E] border border-[#2A313E] rounded px-2 py-1.5 font-mono-tabular text-slate-100"
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-slate-300">
-                <span>Duration (ms)</span>
-                <input
-                  type="number"
-                  min={0}
-                  step={500}
-                  value={newCue.durationMs ?? 4000}
-                  onChange={(e) => setNewCue({ ...newCue, durationMs: Number(e.target.value) })}
-                  className="bg-[#090B0E] border border-[#2A313E] rounded px-2 py-1.5 font-mono-tabular text-slate-100"
-                />
-              </label>
+            {/* Hardware Intensity Slider */}
+            <div className="console-well rounded p-2.5 space-y-1">
+              <div className="flex items-center justify-between text-slate-300">
+                <span>Cue Intensity</span>
+                <span className="font-mono-tabular font-semibold text-amber-300">
+                  {draftIntensity}%
+                </span>
+              </div>
+              <input
+                type="range"
+                aria-label="Cue Intensity"
+                min={0}
+                max={100}
+                value={draftIntensity}
+                style={{ '--slider-track-bg': intensityTrackBg } as React.CSSProperties}
+                onChange={(e) => setCueDraft({ ...cueDraft, intensity: Number(e.target.value) })}
+                className="w-full"
+              />
+            </div>
+
+            {/* Timing Matrix */}
+            <div className="grid grid-cols-2 gap-2.5">
               <label className="flex flex-col gap-1 text-slate-300">
                 <span>Fade In (ms)</span>
                 <input
                   type="number"
                   min={0}
                   step={100}
-                  value={newCue.fadeInMs ?? 600}
-                  onChange={(e) => setNewCue({ ...newCue, fadeInMs: Number(e.target.value) })}
-                  className="bg-[#090B0E] border border-[#2A313E] rounded px-2 py-1.5 font-mono-tabular text-slate-100"
+                  value={cueDraft.fadeInMs ?? 600}
+                  onChange={(e) => setCueDraft({ ...cueDraft, fadeInMs: Number(e.target.value) })}
+                  className="console-well rounded px-2.5 py-1.5 font-mono-tabular text-slate-100 focus:outline-none focus:border-amber-400"
                 />
               </label>
               <label className="flex flex-col gap-1 text-slate-300">
-                <span>Transition</span>
+                <div className="flex items-center justify-between">
+                  <span>Hold (ms)</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCueDraft({
+                        ...cueDraft,
+                        durationMs: (cueDraft.durationMs ?? 0) === 0 ? 4000 : 0,
+                      })
+                    }
+                    className="text-[10px] text-amber-400 hover:underline font-mono-tabular"
+                  >
+                    {(cueDraft.durationMs ?? 0) === 0 ? 'Set 4s' : 'Set Hold (0)'}
+                  </button>
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  step={500}
+                  value={cueDraft.durationMs ?? 4000}
+                  onChange={(e) => setCueDraft({ ...cueDraft, durationMs: Number(e.target.value) })}
+                  className="console-well rounded px-2.5 py-1.5 font-mono-tabular text-slate-100 focus:outline-none focus:border-amber-400"
+                />
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              <label className="flex flex-col gap-1 text-slate-300">
+                <span>Transition Curve</span>
                 <select
-                  value={newCue.transitionType}
+                  value={cueDraft.transitionType}
                   onChange={(e) =>
-                    setNewCue({ ...newCue, transitionType: e.target.value as TransitionType })
+                    setCueDraft({
+                      ...cueDraft,
+                      transitionType: e.target.value as TransitionType,
+                    })
                   }
-                  className="bg-[#090B0E] border border-[#2A313E] rounded px-2 py-1.5 text-slate-100"
+                  className="console-well rounded px-2 py-1.5 text-slate-100 focus:outline-none focus:border-amber-400"
                 >
                   <option value="ease_in_out">Ease In/Out</option>
                   <option value="linear">Linear</option>
@@ -501,15 +785,13 @@ export const CueTimelinePanel: React.FC<CueTimelinePanelProps> = ({
                   <option value="cut">Snap Cut</option>
                 </select>
               </label>
-            </div>
 
-            <div className="grid grid-cols-2 gap-2">
               <label className="flex flex-col gap-1 text-slate-300">
                 <span>Target Group</span>
                 <select
-                  value={newCue.targetGroupId || 'all'}
-                  onChange={(e) => setNewCue({ ...newCue, targetGroupId: e.target.value })}
-                  className="bg-[#090B0E] border border-[#2A313E] rounded px-2 py-1.5 text-slate-100"
+                  value={cueDraft.targetGroupId || 'all'}
+                  onChange={(e) => setCueDraft({ ...cueDraft, targetGroupId: e.target.value })}
+                  className="console-well rounded px-2 py-1.5 text-slate-100 focus:outline-none focus:border-amber-400"
                 >
                   <option value="all">All Groups</option>
                   {show.groups.map((g) => (
@@ -519,51 +801,53 @@ export const CueTimelinePanel: React.FC<CueTimelinePanelProps> = ({
                   ))}
                 </select>
               </label>
-              <label className="flex flex-col gap-1 text-slate-300">
-                <span>Media (Optional)</span>
-                <select
-                  value={newCue.mediaId || ''}
-                  onChange={(e) => setNewCue({ ...newCue, mediaId: e.target.value || null })}
-                  className="bg-[#090B0E] border border-[#2A313E] rounded px-2 py-1.5 text-slate-100"
-                >
-                  <option value="">None</option>
-                  {mediaAssets.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
             </div>
 
-            <label className="flex items-center gap-2 text-slate-300">
+            <label className="flex flex-col gap-1 text-slate-300">
+              <span>Media Projection (Optional)</span>
+              <select
+                value={cueDraft.mediaId || ''}
+                onChange={(e) => setCueDraft({ ...cueDraft, mediaId: e.target.value || null })}
+                className="console-well rounded px-2 py-1.5 text-slate-100 focus:outline-none focus:border-amber-400"
+              >
+                <option value="">None</option>
+                {mediaAssets.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex items-center justify-between console-well rounded px-3 py-2 cursor-pointer text-slate-200">
+              <span>Auto-follow into next cue</span>
               <input
                 type="checkbox"
-                checked={Boolean(newCue.autoFollow)}
-                onChange={(e) => setNewCue({ ...newCue, autoFollow: e.target.checked })}
+                checked={Boolean(cueDraft.autoFollow)}
+                onChange={(e) => setCueDraft({ ...cueDraft, autoFollow: e.target.checked })}
+                className="accent-amber-500"
               />
-              <span>Auto-follow into next cue automatically</span>
             </label>
 
             <button
               type="button"
-              onClick={handleAddCue}
-              className="w-full flex items-center justify-center gap-1.5 py-2 rounded font-semibold bg-amber-500 text-slate-950 hover:bg-amber-400"
+              onClick={handleSaveCue}
+              className="w-full console-btn-amber flex items-center justify-center gap-1.5 py-2.5 rounded font-semibold"
             >
               <Plus className="w-4 h-4" />
-              <span>Add Cue to Sequence</span>
+              <span>{editingCueId ? 'Save Cue Changes' : 'Add Cue to Stack'}</span>
             </button>
           </div>
         </div>
       ) : (
-        /* Multi-Track Visual Timeline Editor */
-        <div className="bg-[#12151B] border border-[#232934] rounded p-4 space-y-4">
+        /* Multi-Track Visual Timeline Sequencer */
+        <div className="console-panel rounded-md p-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <h3 className="font-display text-sm font-semibold tracking-wider uppercase text-slate-100">
                 {activeTimeline.name}
               </h3>
-              <span className="text-xs font-mono-tabular text-amber-400">
+              <span className="text-xs font-mono-tabular text-amber-400 console-well px-2.5 py-1 rounded">
                 {(show.playback.timelinePositionMs / 1000).toFixed(1)}s /{' '}
                 {(activeTimeline.totalDurationMs / 1000).toFixed(1)}s
               </span>
@@ -576,16 +860,16 @@ export const CueTimelinePanel: React.FC<CueTimelinePanelProps> = ({
                     timeline: { ...activeTimeline, loop: !activeTimeline.loop },
                   })
                 }
-                className={`flex items-center gap-1 px-2.5 py-1 rounded border ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded font-medium ${
                   activeTimeline.loop
-                    ? 'bg-amber-500/20 border-amber-500 text-amber-300'
-                    : 'bg-[#1A1F28] border-[#2B3342] text-slate-400'
+                    ? 'console-btn-amber font-semibold'
+                    : 'console-btn text-slate-300'
                 }`}
               >
                 <Repeat className="w-3.5 h-3.5" />
                 <span>{activeTimeline.loop ? 'Loop On' : 'Loop Off'}</span>
               </button>
-              <label className="flex items-center gap-1 text-slate-300">
+              <label className="flex items-center gap-1.5 text-slate-300">
                 <span>Length (s)</span>
                 <input
                   type="number"
@@ -600,9 +884,19 @@ export const CueTimelinePanel: React.FC<CueTimelinePanelProps> = ({
                       },
                     })
                   }
-                  className="w-16 bg-[#090B0E] border border-[#2A313E] rounded px-2 py-1 font-mono-tabular text-slate-100"
+                  className="w-16 console-well rounded px-2 py-1 font-mono-tabular text-slate-100 focus:outline-none focus:border-amber-400"
                 />
               </label>
+            </div>
+          </div>
+
+          {/* Time Ruler */}
+          <div className="flex items-center gap-2 text-[10px] font-mono-tabular text-slate-500">
+            <div className="w-28 shrink-0 text-right pr-2">TIMECODE</div>
+            <div className="flex-1 flex justify-between px-1">
+              {[0, 0.25, 0.5, 0.75, 1].map((pct) => (
+                <span key={pct}>{formatSec(activeTimeline.totalDurationMs * pct)}</span>
+              ))}
             </div>
           </div>
 
@@ -612,23 +906,23 @@ export const CueTimelinePanel: React.FC<CueTimelinePanelProps> = ({
               const trackBlocks = activeTimeline.blocks.filter((b) => b.track === trk.id);
               return (
                 <div key={trk.id} className="flex items-stretch gap-2">
-                  <div className="w-28 shrink-0 bg-[#0D1015] border border-[#232934] rounded px-2 py-2 text-xs font-medium text-slate-300 flex items-center gap-1.5">
+                  <div className="w-28 shrink-0 console-well rounded px-2.5 py-2 text-xs font-medium text-slate-300 flex items-center gap-2">
                     <span className="w-2 h-2 rounded-xs shrink-0" style={{ backgroundColor: trk.color }} />
                     <span className="truncate">{trk.label}</span>
                   </div>
                   <div
                     onClick={(e) => {
                       const rect = e.currentTarget.getBoundingClientRect();
-                      const ratio = (e.clientX - rect.left) / rect.width;
+                      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
                       onCommand('timeline_seek', {
                         positionMs: Math.round(ratio * activeTimeline.totalDurationMs),
                       });
                     }}
-                    className="flex-1 relative h-11 bg-[#080A0D] border border-[#232934] rounded overflow-hidden cursor-pointer"
+                    className="flex-1 relative h-11 console-well rounded overflow-hidden cursor-pointer"
                   >
                     {/* Playhead */}
                     <div
-                      className="absolute top-0 bottom-0 w-0.5 bg-amber-400 z-10 pointer-events-none"
+                      className="absolute top-0 bottom-0 w-0.5 bg-amber-400 z-10 pointer-events-none shadow-[0_0_8px_#F59E0B]"
                       style={{
                         left: `${Math.min(
                           100,
@@ -642,6 +936,10 @@ export const CueTimelinePanel: React.FC<CueTimelinePanelProps> = ({
                       const leftPct = (blk.startMs / Math.max(1, activeTimeline.totalDurationMs)) * 100;
                       const widthPct =
                         (blk.durationMs / Math.max(1, activeTimeline.totalDurationMs)) * 100;
+                      const bgHex = blk.colour || trk.color;
+                      const { r, g, b } = hexToRgb(bgHex);
+                      const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+                      const isBrightBg = lum > 0.6;
                       return (
                         <div
                           key={blk.id}
@@ -649,12 +947,22 @@ export const CueTimelinePanel: React.FC<CueTimelinePanelProps> = ({
                           style={{
                             left: `${leftPct}%`,
                             width: `${Math.max(4, widthPct)}%`,
-                            backgroundColor: blk.colour || trk.color,
+                            backgroundColor: bgHex,
                           }}
-                          className="absolute top-1 bottom-1 rounded px-1.5 flex items-center justify-between gap-1 text-[11px] font-medium text-white shadow border border-white/25 overflow-hidden"
+                          className={`absolute top-1 bottom-1 rounded px-2 flex items-center justify-between gap-1 text-[11px] font-semibold shadow border overflow-hidden ${
+                            isBrightBg
+                              ? 'text-slate-950 border-black/25'
+                              : 'text-white border-white/25'
+                          }`}
                         >
-                          <span className="truncate drop-shadow">{blk.label}</span>
-                          <div className="flex items-center gap-1 shrink-0 bg-black/40 rounded px-1">
+                          <span className="truncate">{blk.label}</span>
+                          <div
+                            className={`flex items-center gap-1 shrink-0 rounded px-1 ${
+                              isBrightBg
+                                ? 'bg-black/15 text-slate-950'
+                                : 'bg-black/50 text-white'
+                            }`}
+                          >
                             <button
                               type="button"
                               aria-label={`Shift ${blk.label} later`}
@@ -670,7 +978,7 @@ export const CueTimelinePanel: React.FC<CueTimelinePanelProps> = ({
                               type="button"
                               aria-label={`Delete timeline block ${blk.label}`}
                               onClick={() => removeBlock(blk.id)}
-                              className="text-[10px] hover:text-red-300"
+                              className="text-[10px] hover:text-red-400"
                             >
                               ×
                             </button>
@@ -685,7 +993,7 @@ export const CueTimelinePanel: React.FC<CueTimelinePanelProps> = ({
           </div>
 
           {/* Add Block Toolbar */}
-          <div className="border-t border-[#222833] pt-3 flex flex-wrap items-end gap-3 text-xs">
+          <div className="console-well rounded p-3 flex flex-wrap items-end gap-3 text-xs">
             <label className="flex flex-col gap-1 text-slate-300">
               <span>Track</span>
               <select
@@ -769,7 +1077,7 @@ export const CueTimelinePanel: React.FC<CueTimelinePanelProps> = ({
             <button
               type="button"
               onClick={handleAddBlock}
-              className="flex items-center gap-1 px-3 py-1.5 rounded font-semibold bg-amber-500 text-slate-950 hover:bg-amber-400"
+              className="console-btn-amber flex items-center gap-1 px-3 py-1.5 rounded font-semibold"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add to Timeline</span>

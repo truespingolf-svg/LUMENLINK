@@ -38,14 +38,40 @@ class AppErrorBoundary extends React.Component<
   }
 }
 
-export default function App() {
+function extractAudienceJoinParam(): { isAudience: boolean; showIdParam?: string } {
   const path = window.location.pathname;
-  const joinMatch = path.match(/^\/join(?:\/([^/]+))?\/?$/);
+  const pathMatch = path.match(/^\/join(?:\/([^/]+))?\/?$/);
+  if (pathMatch) {
+    return {
+      isAudience: true,
+      showIdParam: pathMatch[1] ? decodeURIComponent(pathMatch[1]) : undefined,
+    };
+  }
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('join')) {
+    const code = params.get('join')?.trim();
+    return {
+      isAudience: true,
+      showIdParam: code || undefined,
+    };
+  }
+  const hashMatch = window.location.hash.match(/^#\/join(?:\/([^/]+))?\/?$/);
+  if (hashMatch) {
+    return {
+      isAudience: true,
+      showIdParam: hashMatch[1] ? decodeURIComponent(hashMatch[1]) : undefined,
+    };
+  }
+  return { isAudience: false };
+}
+
+export default function App() {
+  const route = extractAudienceJoinParam();
 
   return (
     <AppErrorBoundary>
-      {joinMatch ? (
-        <AudienceApp showIdParam={joinMatch[1] ? decodeURIComponent(joinMatch[1]) : undefined} />
+      {route.isAudience ? (
+        <AudienceApp showIdParam={route.showIdParam} />
       ) : (
         <HostConsole />
       )}

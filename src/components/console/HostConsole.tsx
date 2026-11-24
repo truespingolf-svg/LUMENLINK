@@ -367,6 +367,7 @@ export const HostConsole: React.FC = () => {
                 <CueTimelinePanel
                   show={show}
                   mediaAssets={host.mediaAssets}
+                  serverOffsetMs={host.serverOffsetMs}
                   onCommand={host.sendHostCommand}
                 />
               )}

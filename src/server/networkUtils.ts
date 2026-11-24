@@ -84,9 +84,16 @@ export function resolvePublicJoinBaseUrl(params: {
 }): string {
   const isPrivateOrLocalUrl = (u: string) =>
     /^https?:\/\/(localhost|127\.|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(u);
+  const isDevUrl = (u: string) => /^https?:\/\/ais-dev-/i.test(u);
 
   const custom = (params.customBaseUrl || '').trim().replace(/\/$/, '');
-  const rawBase = (params.publicUrl || params.fallbackOrigin).trim().replace(/\/$/, '');
+  const cleanFallback = (params.fallbackOrigin || '').trim().replace(/\/$/, '');
+  const isFallbackLivePublic =
+    Boolean(cleanFallback) && !isPrivateOrLocalUrl(cleanFallback) && !isDevUrl(cleanFallback);
+
+  const rawBase = isFallbackLivePublic
+    ? cleanFallback
+    : (params.publicUrl || cleanFallback).trim().replace(/\/$/, '');
   const baseInfo = deriveSharedPreviewUrl(rawBase);
   const preferredPublic = baseInfo.suggestedSharedUrl || baseInfo.resolvedUrl;
 

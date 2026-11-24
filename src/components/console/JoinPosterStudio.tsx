@@ -104,8 +104,13 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
   );
 
   const joinUrl = useMemo(() => {
-    return `${effectivePublicBase}/join/${show.joinCode}`;
+    return `${effectivePublicBase}/?join=${encodeURIComponent(show.joinCode)}`;
   }, [effectivePublicBase, show.joinCode]);
+
+  const localPreviewJoinUrl = useMemo(
+    () => `/?join=${encodeURIComponent(show.joinCode)}`,
+    [show.joinCode],
+  );
 
   // Live probe of whether the QR join URL is actually reachable by audience phones right now
   useEffect(() => {
@@ -377,13 +382,13 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
               <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <div className="font-semibold text-red-200">
-                  Shared Public URL Not Published Yet (HTTP {probe.httpStatus ?? 404})
+                  UNPUBLISHED — Public Link Returns HTTP {probe.httpStatus ?? 404} Until App Is Shared
                 </div>
                 <p className="text-red-100/90 leading-relaxed">
-                  The shared link <code className="font-mono-tabular">{effectivePublicBase}</code> currently returns HTTP 404 (blank page on phones) until this app is published/shared.
+                  The Google preview domain <code className="font-mono-tabular">{effectivePublicBase}</code> returns <strong>Error 404</strong> while unpublished. Click <strong>Share / Deploy</strong> in the top-right corner of AI Studio (or paste your live Cloud Run URL below) so phones on external Wi-Fi or 5G can scan the QR code.
                 </p>
                 <p className="text-red-200/85 leading-relaxed">
-                  Click <strong>Share / Deploy</strong> in the top-right to publish your Shared Public URL, then open your <strong>Host Console</strong> at that published URL—phones on the same Wi-Fi, different Wi-Fi, or mobile data can then scan the separate join link below and sync live.
+                  To test an audience screen immediately right now without 404, click <strong>Open Audience Page</strong> below (uses your active live server).
                 </p>
               </div>
             </div>
@@ -429,10 +434,10 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
               <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
               <div className="space-y-0.5">
                 <div className="font-semibold text-emerald-300">
-                  LIVE (HTTP {probe.httpStatus ?? 200}) — Works on Any Wi-Fi or Mobile Data
+                  LIVE (HTTP {probe.httpStatus ?? 200}) — Ready on Any Wi-Fi or 5G Network
                 </div>
                 <div className="text-slate-400">
-                  Your Host Console opens at <code className="font-mono-tabular">/</code> while phones scanning this QR open the separate audience join link <code className="font-mono-tabular">/join/{show.joinCode}</code> from any network.
+                  Host Console stays on <code className="font-mono-tabular">/</code> while audience devices open <code className="font-mono-tabular">/?join={show.joinCode}</code> cleanly.
                 </div>
               </div>
             </div>
@@ -442,7 +447,7 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
             <div className="console-well border-slate-700/60 rounded p-2.5 flex items-start gap-2.5 text-[11px] text-slate-300">
               <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
               <div>
-                <strong>Shared Public Cloud Sync:</strong> Checking live phone reachability for <code className="font-mono-tabular">{joinUrl}</code>...
+                <strong>Shared Public Cloud Sync:</strong> Checking live reachability for <code className="font-mono-tabular">{joinUrl}</code>...
               </div>
             </div>
           )}
@@ -471,7 +476,7 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
                   }}
                   className="console-btn px-2 py-0.5 rounded text-[11px] text-amber-300"
                 >
-                  Reset to Shared Public URL (ais-pre)
+                  Use Shared URL (ais-pre)
                 </button>
               )}
             </div>
@@ -506,10 +511,22 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
             <div className="space-y-2 min-w-0 flex-1 w-full">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-semibold text-amber-400">
-                  Separate Audience Join Link (For Phones)
+                  Separate Audience Join Link (For Phones &amp; QR)
                 </span>
-                <span className="text-[10px] font-mono-tabular text-slate-400">
-                  Host Console: / · Phones: /join/{show.joinCode}
+                <span
+                  className={`text-[10px] font-mono-tabular font-semibold ${
+                    probe.status === 'live'
+                      ? 'text-emerald-400'
+                      : probe.status === 'not_published'
+                        ? 'text-red-400'
+                        : 'text-slate-400'
+                  }`}
+                >
+                  {probe.status === 'live'
+                    ? 'PUBLIC LIVE (HTTP 200)'
+                    : probe.status === 'not_published'
+                      ? 'UNPUBLISHED (HTTP 404)'
+                      : `Join: /?join=${show.joinCode}`}
                 </span>
               </div>
               <div className="flex items-center gap-2 bg-[#12151B] border border-[#2A313E] rounded p-1.5">
@@ -535,17 +552,18 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
                   <span>{copiedUrl ? 'Copied Link' : 'Copy Join Link'}</span>
                 </button>
                 <a
-                  href={`/join/${show.joinCode}`}
+                  href={localPreviewJoinUrl}
                   target="_blank"
                   rel="noreferrer"
                   className="console-btn-amber flex items-center gap-1 px-2.5 py-1.5 rounded font-semibold whitespace-nowrap"
+                  title="Open the live Audience Screen directly in a new tab"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                   <span>Open Audience Page</span>
                 </a>
               </div>
               <p className="text-[11px] text-slate-400 leading-snug">
-                Works across the same Wi-Fi, different Wi-Fi networks, and 4G/5G mobile data using the Shared Public URL with real-time WebSocket + HTTPS cloud sync.
+                Works across any Wi-Fi network and 4G/5G mobile data once shared, with real-time WebSocket + HTTPS sync. Both <code className="font-mono-tabular">/?join={show.joinCode}</code> and <code className="font-mono-tabular">/join/{show.joinCode}</code> open the Audience view.
               </p>
             </div>
           </div>

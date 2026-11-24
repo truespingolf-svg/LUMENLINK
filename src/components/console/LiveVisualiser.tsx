@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Maximize2, Minimize2, Monitor, Smartphone, Tablet } from 'lucide-react';
 import { AudienceDevice, FixtureGroup, LiveLightingState } from '../../shared/types';
-import { renderFixtureOutput } from '../../engine/effects';
+import { EFFECT_CATALOG, renderFixtureOutput } from '../../engine/effects';
 
 export type VisualiserViewMode = 'grid' | 'layout' | 'list' | 'group';
 
@@ -15,6 +15,29 @@ interface LiveVisualiserProps {
   fullscreenOpen?: boolean;
   onToggleFullscreen?: () => void;
 }
+
+const VIRTUAL_STAGE_FIXTURES: AudienceDevice[] = Array.from({ length: 12 }, (_, idx) => {
+  const normX = (idx + 0.5) / 12;
+  return {
+    id: `virtual-stage-${idx + 1}`,
+    fixtureNumber: idx + 1,
+    name: `Zone ${idx + 1}`,
+    deviceType: 'smartphone',
+    orientation: 'portrait',
+    status: 'connected',
+    batteryLevel: null,
+    lastSeenMs: 0,
+    joinedAtMs: 0,
+    groupId: 'grp-all',
+    excluded: false,
+    x: normX,
+    y: 0.5,
+    row: 0,
+    col: idx,
+    overrideColor: null,
+    identifyUntilMs: 0,
+  };
+});
 
 export const LiveVisualiser: React.FC<LiveVisualiserProps> = ({
   devices,
@@ -50,10 +73,37 @@ export const LiveVisualiser: React.FC<LiveVisualiserProps> = ({
     return () => cancelAnimationFrame(rafId);
   }, [serverOffsetMs, hasDynamicEffect, lighting]);
 
-  const activeLayerNames = lighting.layers
-    .filter((l) => l.enabled)
-    .map((l) => l.name || l.type)
+  const enabledLayers = lighting.layers.filter((l) => l.enabled);
+  const activeLayerLabels = enabledLayers
+    .map((l) => EFFECT_CATALOG.find((fx) => fx.type === l.type)?.label || l.name || l.type)
     .join(' + ');
+
+  // Always compute live stage output across 12 spatial zones so colour/effects/fades
+  // reflect instantaneously on the console even when 0 phones are currently connected.
+  const stageZoneOutputs = useMemo(
+    () =>
+      VIRTUAL_STAGE_FIXTURES.map((vf) =>
+        renderFixtureOutput(vf, VIRTUAL_STAGE_FIXTURES, groups, lighting, tickMs),
+      ),
+    [groups, lighting, tickMs],
+  );
+
+  const centerOutput = stageZoneOutputs[Math.floor(stageZoneOutputs.length / 2)];
+  const statusTag = lighting.blackout
+    ? 'BLACKOUT'
+    : lighting.emergencyNeutral
+      ? 'NEUTRAL WHITE'
+      : lighting.freeze
+        ? 'FROZEN'
+        : 'LIVE OUTPUT';
+
+  const statusTone = lighting.blackout
+    ? 'text-red-400'
+    : lighting.emergencyNeutral
+      ? 'text-slate-100'
+      : lighting.freeze
+        ? 'text-sky-400'
+        : 'text-emerald-400';
 
   const renderMiniPhone = (device: AudienceDevice, positioned = false) => {
     const out = renderFixtureOutput(device, devices, groups, lighting, tickMs);
@@ -142,14 +192,11 @@ export const LiveVisualiser: React.FC<LiveVisualiserProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-[#222833]">
         <div className="flex items-center gap-2.5">
           <h2 className="font-display text-sm font-semibold tracking-wider text-slate-100 uppercase">
-            Live Audience Visualiser
+            Live Output Visualiser
           </h2>
           <span className="text-xs font-mono-tabular text-slate-300 console-well px-2 py-0.5 rounded">
             {connectedCount}/{devices.length} online
           </span>
-          {activeLayerNames && (
-            <span className="text-xs text-amber-400 truncate max-w-[200px]">{activeLayerNames}</span>
-          )}
         </div>
 
         <div className="flex items-center gap-1">
@@ -158,7 +205,7 @@ export const LiveVisualiser: React.FC<LiveVisualiserProps> = ({
               key={mode}
               type="button"
               onClick={() => setViewMode(mode)}
-              className={`px-2.5 py-1 text-xs rounded capitalize ${
+              className={`px-2 py-1 text-[11px] rounded capitalize ${
                 viewMode === mode
                   ? 'console-btn-amber font-semibold'
                   : 'console-btn text-slate-300 font-medium'
@@ -180,13 +227,84 @@ export const LiveVisualiser: React.FC<LiveVisualiserProps> = ({
         </div>
       </div>
 
+      {/* Always-On Live Stage Output Monitor — reflects colour, intensity, fades, effects & safety states instantaneously */}
+      <div
+        data-testid="live-stage-monitor"
+        className="mx-3 mt-3 console-well rounded p-2.5 space-y-2 shrink-0"
+      >
+        <div className="flex items-center justify-between gap-2 text-[11px]">
+          <div className="flex items-center gap-2 min-w-0">
+            <span
+              className="w-4 h-4 rounded-sm border border-white/25 shrink-0"
+              style={{
+                backgroundColor: centerOutput.colorHex,
+                boxShadow: lighting.blackout ? 'none' : `0 0 10px ${centerOutput.colorHex}66`,
+              }}
+            />
+            <span
+              data-testid="live-output-hex"
+              className="font-mono-tabular font-semibold text-slate-100 uppercase"
+            >
+              {centerOutput.colorHex}
+            </span>
+            <span className="font-mono-tabular text-slate-400">
+              {lighting.masterIntensity}%
+            </span>
+          </div>
+          <span className={`font-mono-tabular font-semibold tracking-wider uppercase ${statusTone}`}>
+            {statusTag}
+          </span>
+        </div>
+
+        {/* 12-Zone Spatial Preview Array */}
+        <div
+          className="grid grid-cols-12 gap-1 h-11 p-1 bg-[#06070A] rounded border border-[#1E2430]"
+          aria-label="12-Zone Live Stage Output Array"
+        >
+          {stageZoneOutputs.map((out, idx) => (
+            <div
+              key={idx}
+              className="relative rounded-[2px] border border-white/10 overflow-hidden transition-[background-color] duration-75"
+              style={{
+                backgroundColor: out.colorHex,
+                boxShadow:
+                  lighting.blackout || out.intensity < 0.05
+                    ? 'none'
+                    : `0 0 8px ${out.colorHex}45`,
+              }}
+              title={`Zone ${idx + 1}: ${out.colorHex}`}
+            >
+              {out.mediaUrl && out.mediaKind !== 'video' && (
+                <img
+                  src={out.mediaUrl}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                  style={{ opacity: out.mediaOpacity }}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between gap-2 text-[10px] text-slate-400 font-mono-tabular">
+          <span className="truncate">
+            {activeLayerLabels ? `FX: ${activeLayerLabels}` : 'FX: Solid Base Look'}
+          </span>
+          <span className="shrink-0">
+            RGB({centerOutput.rgb[0]},{centerOutput.rgb[1]},{centerOutput.rgb[2]})
+          </span>
+        </div>
+      </div>
+
+      {/* Connected Audience Fixtures Grid / Layout / Group / List */}
       <div className="flex-1 p-3 overflow-auto">
         {devices.length === 0 ? (
-          <div className="h-full min-h-[180px] flex flex-col items-center justify-center text-center gap-2 text-slate-400">
-            <Smartphone className="w-7 h-7 text-slate-500" />
-            <p className="text-sm text-slate-300">No audience fixtures connected yet</p>
-            <p className="text-xs text-slate-500 max-w-md">
-              Open the Join URL or scan the QR code from the Join &amp; Poster tab to connect smartphones, tablets, or browser windows as live fixtures.
+          <div className="h-full min-h-[120px] flex flex-col items-center justify-center text-center gap-1.5 text-slate-400 py-4">
+            <Smartphone className="w-6 h-6 text-slate-500" />
+            <p className="text-xs font-medium text-slate-300">No audience fixtures joined yet</p>
+            <p className="text-[11px] text-slate-500 max-w-xs">
+              Use the Join &amp; Poster tab to open the Audience link or scan the QR code on phones.
             </p>
           </div>
         ) : viewMode === 'grid' ? (
@@ -194,7 +312,7 @@ export const LiveVisualiser: React.FC<LiveVisualiserProps> = ({
             {devices.map((d) => renderMiniPhone(d, false))}
           </div>
         ) : viewMode === 'layout' ? (
-          <div className="relative w-full min-h-[260px] h-full bg-[#090B0E] border border-[#232934] rounded overflow-hidden">
+          <div className="relative w-full min-h-[240px] h-full bg-[#090B0E] border border-[#232934] rounded overflow-hidden">
             <div className="absolute top-2 left-1/2 -translate-x-1/2 text-[10px] font-mono-tabular text-slate-500 tracking-widest uppercase">
               STAGE FRONT
             </div>

@@ -7,6 +7,7 @@ import {
   ShowFile,
   WsMessageToClient,
 } from '../shared/types';
+import { applyHostCommandToState } from '../engine/hostCommands';
 import { createDemoShow } from '../engine/shows';
 
 export interface HostSocketState {
@@ -66,15 +67,73 @@ export function useHostSocket() {
   });
 
   const wsRef = useRef<WebSocket | null>(null);
+  const wsRegisteredRef = useRef<boolean>(false);
   const tokenRef = useRef<string | null>(null);
-  const showIdRef = useRef<string | undefined>(undefined);
+  const showIdRef = useRef<string | undefined>(initialShow.id);
   const reconnectTimerRef = useRef<number | null>(null);
   const authRetryTimerRef = useRef<number | null>(null);
   const unmountedRef = useRef(false);
+  const lastLocalMutationAtRef = useRef<number>(0);
+  const serverOffsetRef = useRef<number>(0);
+  const pendingCommandsRef = useRef<Array<{ action: string; payload: Record<string, unknown>; showId: string }>>([]);
   const authFnRef = useRef<(passcode?: string) => Promise<boolean>>(async () => false);
+
+  const sendCommandViaHttp = useCallback(
+    async (token: string, action: string, showId: string, payload: Record<string, unknown>, allowRetry = true) => {
+      try {
+        const res = await fetch('/api/host/command', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ action, showId, payload }),
+        });
+        if (res.status === 401 && allowRetry) {
+          tokenRef.current = null;
+          const ok = await authFnRef.current();
+          if (ok && tokenRef.current) {
+            await sendCommandViaHttp(tokenRef.current, action, showId, payload, false);
+          }
+          return;
+        }
+        if (!res.ok || unmountedRef.current) return;
+        const data = await res.json();
+        if (typeof data.serverTimeMs === 'number') {
+          serverOffsetRef.current = data.serverTimeMs - Date.now();
+        }
+        if (data.show) {
+          showIdRef.current = data.show.id;
+          cacheShowSnapshot(data.show);
+        }
+        setState((prev) => ({
+          ...prev,
+          httpSynced: true,
+          serverOffsetMs: serverOffsetRef.current,
+          show: data.show || prev.show,
+          devices: data.devices || prev.devices,
+          showsList: data.shows || prev.showsList,
+        }));
+      } catch {
+        // Network issue — optimistic local state keeps console responsive
+      }
+    },
+    [],
+  );
+
+  const flushPendingCommands = useCallback(
+    (token: string) => {
+      const queue = pendingCommandsRef.current.splice(0, pendingCommandsRef.current.length);
+      for (const cmd of queue) {
+        sendCommandViaHttp(token, cmd.action, cmd.showId, cmd.payload);
+      }
+    },
+    [sendCommandViaHttp],
+  );
 
   const fetchShowsAndNetwork = useCallback(async (token: string) => {
     try {
+      const reqStartedAt = Date.now();
       const [showsRes, netRes, mediaRes] = await Promise.all([
         fetch('/api/shows', { headers: { Authorization: `Bearer ${token}` } }),
         fetch('/api/network-info'),
@@ -105,13 +164,14 @@ export function useHostSocket() {
           showsFromHttp?.[0];
         if (activeShowFromHttp) {
           showIdRef.current = activeShowFromHttp.id;
-          cacheShowSnapshot(activeShowFromHttp);
         }
         if (Array.isArray(data.devices)) {
           devicesFromHttp = data.devices;
         }
         if (typeof data.serverTimeMs === 'number') {
-          serverTimeFromHttp = data.serverTimeMs;
+          const srvTime = data.serverTimeMs;
+          serverTimeFromHttp = srvTime;
+          serverOffsetRef.current = srvTime - Date.now();
         }
       }
       if (netRes.ok) {
@@ -123,6 +183,11 @@ export function useHostSocket() {
       }
 
       if (!unmountedRef.current) {
+        // Avoid overwriting brand-new optimistic edits with an in-flight background poll
+        const hasRecentLocalEdit = lastLocalMutationAtRef.current > reqStartedAt;
+        if (!hasRecentLocalEdit && activeShowFromHttp) {
+          cacheShowSnapshot(activeShowFromHttp);
+        }
         setState((prev) => ({
           ...prev,
           httpSynced: showsRes.ok || prev.httpSynced,
@@ -130,8 +195,8 @@ export function useHostSocket() {
             typeof serverTimeFromHttp === 'number'
               ? serverTimeFromHttp - Date.now()
               : prev.serverOffsetMs,
-          show: activeShowFromHttp || prev.show,
-          showsList: showsFromHttp || prev.showsList,
+          show: hasRecentLocalEdit ? prev.show : activeShowFromHttp || prev.show,
+          showsList: hasRecentLocalEdit ? prev.showsList : showsFromHttp || prev.showsList,
           devices: devicesFromHttp || prev.devices,
           networkInfo: netFromHttp || prev.networkInfo,
           mediaAssets: mediaFromHttp || prev.mediaAssets,
@@ -144,6 +209,7 @@ export function useHostSocket() {
 
   const connectWs = useCallback((token: string, targetShowId?: string) => {
     if (unmountedRef.current) return;
+    wsRegisteredRef.current = false;
     if (wsRef.current) {
       wsRef.current.onclose = null;
       wsRef.current.close();
@@ -165,15 +231,18 @@ export function useHostSocket() {
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data) as WsMessageToClient;
-        const offset = msg.serverTimeMs ? msg.serverTimeMs - Date.now() : 0;
+        const offset = msg.serverTimeMs ? msg.serverTimeMs - Date.now() : serverOffsetRef.current;
+        if (msg.serverTimeMs) serverOffsetRef.current = offset;
 
         if (msg.type === 'error' && msg.message === 'Unauthorized host session') {
+          wsRegisteredRef.current = false;
           tokenRef.current = null;
           authFnRef.current();
           return;
         }
 
         if (msg.type === 'welcome_sync') {
+          wsRegisteredRef.current = true;
           if (msg.show) {
             showIdRef.current = msg.show.id;
             cacheShowSnapshot(msg.show);
@@ -210,6 +279,7 @@ export function useHostSocket() {
     };
 
     ws.onclose = () => {
+      wsRegisteredRef.current = false;
       setState((prev) => ({ ...prev, connected: false }));
       if (!unmountedRef.current && tokenRef.current) {
         if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
@@ -244,23 +314,23 @@ export function useHostSocket() {
           requiresPasscode: false,
           passcodeError: null,
         }));
+        flushPendingCommands(data.hostToken);
         await fetchShowsAndNetwork(data.hostToken);
         connectWs(data.hostToken);
         return true;
       } catch {
-        // Retry automatically if server is still warming up (e.g. cold boot after publish)
         if (!unmountedRef.current && !passcode) {
           if (authRetryTimerRef.current) window.clearTimeout(authRetryTimerRef.current);
           authRetryTimerRef.current = window.setTimeout(() => {
             if (!unmountedRef.current && !tokenRef.current) {
               authFnRef.current();
             }
-          }, 2000);
+          }, 1500);
         }
         return false;
       }
     },
-    [connectWs, fetchShowsAndNetwork],
+    [connectWs, fetchShowsAndNetwork, flushPendingCommands],
   );
 
   useEffect(() => {
@@ -304,70 +374,50 @@ export function useHostSocket() {
 
   const sendHostCommand = useCallback(
     (action: string, payload: Record<string, unknown> = {}) => {
-      if (action === 'update_poster_design' && payload.posterDesign) {
-        setState((prev) => ({
+      lastLocalMutationAtRef.current = Date.now();
+      const targetShowId = showIdRef.current || state.show.id;
+
+      // Apply optimistically at 0ms so console buttons, colour pickers, cues & sliders always reflect immediately
+      setState((prev) => {
+        const outcome = applyHostCommandToState({
+          show: prev.show,
+          devices: prev.devices,
+          allShows: prev.showsList,
+          mediaAssets: prev.mediaAssets,
+          action,
+          payload,
+          nowMs: Date.now() + serverOffsetRef.current,
+          mutateInPlace: false,
+        });
+        cacheShowSnapshot(outcome.show);
+        return {
           ...prev,
-          show: {
-            ...prev.show,
-            posterDesign: {
-              ...prev.show.posterDesign,
-              ...(payload.posterDesign as Record<string, unknown>),
-            },
-          },
-        }));
-      }
+          show: outcome.show,
+          devices: outcome.devices,
+          showsList: prev.showsList.map((s) => (s.id === outcome.show.id ? outcome.show : s)),
+        };
+      });
 
       const ws = wsRef.current;
-      if (ws && ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN && wsRegisteredRef.current) {
         ws.send(
           JSON.stringify({
             type: 'host_command',
-            showId: showIdRef.current || state.show.id,
+            showId: targetShowId,
             payload: { action, ...payload },
           }),
         );
         return;
       }
 
-      // HTTP REST fallback when WebSocket is disconnected or proxy-blocked
       if (tokenRef.current) {
-        fetch('/api/host/command', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${tokenRef.current}`,
-          },
-          body: JSON.stringify({
-            action,
-            showId: showIdRef.current || state.show.id,
-            payload,
-          }),
-        })
-          .then(async (res) => {
-            if (res.status === 401) {
-              tokenRef.current = null;
-              authFnRef.current();
-              return;
-            }
-            if (!res.ok) return;
-            const data = await res.json();
-            if (data.show) cacheShowSnapshot(data.show);
-            setState((prev) => ({
-              ...prev,
-              httpSynced: true,
-              serverOffsetMs:
-                typeof data.serverTimeMs === 'number'
-                  ? data.serverTimeMs - Date.now()
-                  : prev.serverOffsetMs,
-              show: data.show || prev.show,
-              devices: data.devices || prev.devices,
-              showsList: data.shows || prev.showsList,
-            }));
-          })
-          .catch(() => {});
+        sendCommandViaHttp(tokenRef.current, action, targetShowId, payload);
+      } else {
+        pendingCommandsRef.current.push({ action, payload, showId: targetShowId });
+        authFnRef.current();
       }
     },
-    [state.show.id],
+    [sendCommandViaHttp, state.show.id],
   );
 
   const createShow = useCallback(
