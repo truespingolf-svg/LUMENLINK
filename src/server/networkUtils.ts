@@ -81,19 +81,21 @@ export function resolvePublicJoinBaseUrl(params: {
   customBaseUrl?: string;
   publicUrl?: string;
   fallbackOrigin: string;
-  lanAddresses?: string[];
-  port?: number;
 }): string {
+  const isPrivateOrLocalUrl = (u: string) =>
+    /^https?:\/\/(localhost|127\.|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(u);
+
   const custom = (params.customBaseUrl || '').trim().replace(/\/$/, '');
-  if (custom) return custom;
   const rawBase = (params.publicUrl || params.fallbackOrigin).trim().replace(/\/$/, '');
-  const info = deriveSharedPreviewUrl(rawBase);
-  if (info.suggestedSharedUrl) return info.suggestedSharedUrl;
-  const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(info.resolvedUrl);
-  if (isLocalhost && params.lanAddresses && params.lanAddresses.length > 0) {
-    return `http://${params.lanAddresses[0]}:${params.port || 3000}`;
+  const baseInfo = deriveSharedPreviewUrl(rawBase);
+  const preferredPublic = baseInfo.suggestedSharedUrl || baseInfo.resolvedUrl;
+
+  if (custom && (!isPrivateOrLocalUrl(custom) || isPrivateOrLocalUrl(preferredPublic))) {
+    const customInfo = deriveSharedPreviewUrl(custom);
+    return customInfo.suggestedSharedUrl || customInfo.resolvedUrl;
   }
-  return info.resolvedUrl;
+
+  return preferredPublic;
 }
 
 export type JoinUrlProbeStatus = 'live' | 'not_published' | 'auth_required' | 'unreachable';
@@ -108,7 +110,7 @@ export function classifyJoinUrlProbe(params: {
   if (httpStatus >= 200 && httpStatus < 300) {
     return {
       status: 'live',
-      message: 'Public Join URL is live (HTTP 200) and ready for audience phone scans.',
+      message: 'Shared Public Join URL is live (HTTP 200) and works on any Wi-Fi or mobile data.',
     };
   }
   if (
@@ -122,7 +124,7 @@ export function classifyJoinUrlProbe(params: {
     return {
       status: 'auth_required',
       message:
-        'This URL redirects to sign-in on other devices. Use a published Shared URL (ais-pre-...) or a local network IP.',
+        'This URL requires developer sign-in on phones. Use the published Shared Public URL (ais-pre-...) so anyone can join.',
     };
   }
   if (httpStatus === 404) {

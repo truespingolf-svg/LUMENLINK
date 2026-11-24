@@ -135,13 +135,19 @@ async function startServer(): Promise<void> {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
 
+  app.use('/api', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    next();
+  });
+
   // Health & network discovery
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, serverTimeMs: Date.now() });
   });
 
   app.get('/api/network-info', (req, res) => {
-    const protocol = req.headers['x-forwarded-proto'] === 'https' ? 'https' : req.protocol;
+    const fwdProto = String(req.headers['x-forwarded-proto'] || '');
+    const protocol = fwdProto.includes('https') || req.protocol === 'https' ? 'https' : 'http';
     const hostHeader = String(req.headers['x-forwarded-host'] || req.headers.host || `localhost:${PORT}`);
     const requestOrigin = `${protocol}://${hostHeader}`.replace(/\/$/, '');
     const envPublic = process.env.APP_URL && process.env.APP_URL !== 'MY_APP_URL'
@@ -233,7 +239,7 @@ async function startServer(): Promise<void> {
     res.json({ requiresPasscode: Boolean(HOST_PASSCODE) });
   });
 
-  // Public show info for Audience Join page
+  // Public show info & HTTP fallback for Audience Join page
   app.get('/api/public/show/:showId', (req, res) => {
     const show = store.getShow(req.params.showId);
     res.json({
@@ -244,10 +250,130 @@ async function startServer(): Promise<void> {
     });
   });
 
-  // Host show management APIs
-  app.get('/api/shows', requireHostAuth, (_req, res) => {
+  app.get('/api/public/show/:showId/live', (req, res) => {
+    const nowMs = Date.now();
+    const show = store.getShow(req.params.showId);
+    const deviceId = typeof req.query.deviceId === 'string' ? req.query.deviceId : undefined;
+    if (deviceId) {
+      store.updateAudienceMeta(show.id, deviceId, {}, nowMs);
+    }
+    const devices = store.getDevices(show.id);
+    const selfDevice = deviceId ? devices.find((d) => d.id === deviceId) || null : null;
     res.json({
-      activeShowId: store.getActiveShow().id,
+      serverTimeMs: nowMs,
+      show,
+      lighting: show.lighting,
+      playback: show.playback,
+      device: selfDevice,
+      devices,
+    });
+  });
+
+  app.post('/api/public/audience/register', (req, res) => {
+    const nowMs = Date.now();
+    const show = store.getShow(typeof req.body?.showId === 'string' ? req.body.showId : undefined);
+    const deviceId =
+      typeof req.body?.deviceId === 'string' && req.body.deviceId
+        ? req.body.deviceId
+        : `dev-${crypto.randomUUID().slice(0, 8)}`;
+    const p = req.body?.payload || {};
+    const device = store.registerAudienceDevice(
+      show.id,
+      {
+        deviceId,
+        name: typeof p.name === 'string' ? p.name : undefined,
+        deviceType: (p.deviceType as 'smartphone' | 'tablet' | 'desktop' | 'unknown') || 'smartphone',
+        orientation: (p.orientation as 'portrait' | 'landscape') || 'portrait',
+        batteryLevel: typeof p.batteryLevel === 'number' ? p.batteryLevel : null,
+        screenWidth: typeof p.screenWidth === 'number' ? p.screenWidth : undefined,
+        screenHeight: typeof p.screenHeight === 'number' ? p.screenHeight : undefined,
+      },
+      nowMs,
+    );
+    const devices = store.getDevices(show.id);
+    broadcastToShow(show.id, {
+      type: 'devices_update',
+      serverTimeMs: nowMs,
+      devices,
+    });
+    res.json({
+      serverTimeMs: nowMs,
+      show,
+      lighting: show.lighting,
+      playback: show.playback,
+      device,
+      devices,
+    });
+  });
+
+  // Host show management & HTTP command fallback APIs
+  app.get('/api/shows', requireHostAuth, (_req, res) => {
+    const activeShow = store.getActiveShow();
+    res.json({
+      serverTimeMs: Date.now(),
+      activeShowId: activeShow.id,
+      activeShow,
+      devices: store.getDevices(activeShow.id),
+      shows: store.listShows(),
+    });
+  });
+
+  app.post('/api/host/command', requireHostAuth, (req, res) => {
+    const nowMs = Date.now();
+    const action = String(req.body?.action || '');
+    const showId = typeof req.body?.showId === 'string' ? req.body.showId : store.getActiveShow().id;
+    const payload = (req.body?.payload && typeof req.body.payload === 'object' ? req.body.payload : {}) as Record<string, unknown>;
+    const result = store.applyHostCommand(showId, action, payload, nowMs);
+
+    if (result.lightingChanged || result.playbackChanged || result.showChanged) {
+      broadcastToShow(result.show.id, {
+        type: 'state_update',
+        serverTimeMs: nowMs,
+        show: result.show,
+        lighting: result.show.lighting,
+        playback: result.show.playback,
+      });
+    }
+    if (result.devicesChanged) {
+      broadcastToShow(result.show.id, {
+        type: 'devices_update',
+        serverTimeMs: nowMs,
+        devices: store.getDevices(result.show.id),
+      });
+    }
+    if (result.identifyPayload) {
+      for (const client of clients) {
+        if (
+          client.role === 'audience' &&
+          client.showId === result.show.id &&
+          client.deviceId &&
+          result.identifyPayload.deviceIds.includes(client.deviceId)
+        ) {
+          sendWs(client.ws, {
+            type: 'identify_pulse',
+            serverTimeMs: nowMs,
+            identifyUntilMs: result.identifyPayload.untilMs,
+          });
+        }
+      }
+    }
+    if (result.disconnectDeviceIds && result.disconnectDeviceIds.length > 0) {
+      for (const client of clients) {
+        if (
+          client.role === 'audience' &&
+          client.showId === result.show.id &&
+          client.deviceId &&
+          result.disconnectDeviceIds.includes(client.deviceId)
+        ) {
+          client.ws.close(4001, 'Disconnected by host console');
+        }
+      }
+    }
+
+    res.json({
+      serverTimeMs: nowMs,
+      show: result.show,
+      devices: store.getDevices(result.show.id),
       shows: store.listShows(),
     });
   });
@@ -608,8 +734,17 @@ async function startServer(): Promise<void> {
     app.use(vite.middlewares);
   } else {
     const distDir = path.resolve(process.cwd(), 'dist');
-    app.use(express.static(distDir));
+    app.use(
+      express.static(distDir, {
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('index.html')) {
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+          }
+        },
+      }),
+    );
     app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.sendFile(path.join(distDir, 'index.html'));
     });
   }

@@ -45,6 +45,10 @@ interface JoinProbeState {
 
 const CUSTOM_REMOTE_URL_KEY = 'lumenlink_custom_remote_base_url';
 
+function isPrivateOrLocalBase(url: string): boolean {
+  return /^https?:\/\/(localhost|127\.|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(url);
+}
+
 export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
   show,
   networkInfo,
@@ -56,7 +60,10 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
   const [customRemoteBase, setCustomRemoteBase] = useState<string>(() => {
     try {
       const saved = window.localStorage.getItem(CUSTOM_REMOTE_URL_KEY) || '';
-      if (!saved) return '';
+      if (!saved || isPrivateOrLocalBase(saved)) {
+        if (saved) window.localStorage.removeItem(CUSTOM_REMOTE_URL_KEY);
+        return '';
+      }
       const info = deriveSharedPreviewUrl(saved);
       return info.suggestedSharedUrl || info.resolvedUrl;
     } catch {
@@ -76,7 +83,6 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
 
   const posterRef = useRef<HTMLDivElement>(null);
 
-  const port = networkInfo?.port || 3000;
   const detectedPublicInfo = useMemo(() => {
     const raw = networkInfo?.publicUrl || window.location.origin;
     return deriveSharedPreviewUrl(raw);
@@ -88,10 +94,8 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
         customBaseUrl: customRemoteBase,
         publicUrl: networkInfo?.publicUrl,
         fallbackOrigin: window.location.origin,
-        lanAddresses: networkInfo?.lanAddresses,
-        port,
       }),
-    [customRemoteBase, networkInfo?.lanAddresses, networkInfo?.publicUrl, port],
+    [customRemoteBase, networkInfo?.publicUrl],
   );
 
   const isEnteringDevUrl = useMemo(
@@ -100,8 +104,8 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
   );
 
   const joinUrl = useMemo(() => {
-    return `${effectivePublicBase}/join/${show.id}`;
-  }, [effectivePublicBase, show.id]);
+    return `${effectivePublicBase}/join/${show.joinCode}`;
+  }, [effectivePublicBase, show.joinCode]);
 
   // Live probe of whether the QR join URL is actually reachable by audience phones right now
   useEffect(() => {
@@ -328,18 +332,27 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-      {/* Left Column: Network Mode + Poster Customisation Controls */}
+      {/* Left Column: Shared Public URL + Poster Customisation Controls */}
       <div className="xl:col-span-6 flex flex-col gap-4">
-        {/* Public Network Join URL & Direct QR */}
+        {/* Shared Public URL & Separate Audience Join Link */}
         <div className="console-panel rounded-md p-4 space-y-3 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Globe className="w-4 h-4 text-amber-400" />
               <h3 className="font-display text-sm font-semibold tracking-wider uppercase text-slate-100">
-                Public Network Join URL
+                Shared Public Join Link &amp; QR
               </h3>
             </div>
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onCommand('regenerate_join_code')}
+                className="console-btn-amber flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-semibold"
+                title="Generate a fresh unique separate join link and QR code for audience phones"
+              >
+                <QrCode className="w-3 h-3" />
+                <span>Generate New Join Link &amp; QR</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setProbeTrigger((n) => n + 1)}
@@ -364,13 +377,13 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
               <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <div className="font-semibold text-red-200">
-                  Phone Blank Page Detected (HTTP {probe.httpStatus ?? 404} — Empty 0-byte response)
+                  Shared Public URL Not Published Yet (HTTP {probe.httpStatus ?? 404})
                 </div>
                 <p className="text-red-100/90 leading-relaxed">
-                  The public <code className="font-mono-tabular">ais-pre-...</code> link returns HTTP 404 right now because this app has not been <strong>Shared / Published</strong> yet—so scanning it on another phone opens an empty blank page.
+                  The shared link <code className="font-mono-tabular">{effectivePublicBase}</code> currently returns HTTP 404 (blank page on phones) until this app is published/shared.
                 </p>
                 <p className="text-red-200/85 leading-relaxed">
-                  <strong>To control phones from another device:</strong> Click <strong>Share / Deploy</strong> in the top-right to publish this app, then open the <strong>Host Console</strong> at that published URL (so both your host computer and audience phones connect to the same live server)—or run <code className="font-mono-tabular">npm run dev</code> locally on shared Wi-Fi and enter your LAN IP below.
+                  Click <strong>Share / Deploy</strong> in the top-right to publish your Shared Public URL, then open your <strong>Host Console</strong> at that published URL—phones on the same Wi-Fi, different Wi-Fi, or mobile data can then scan the separate join link below and sync live.
                 </p>
               </div>
             </div>
@@ -385,10 +398,10 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
               <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <div className="font-semibold text-amber-200">
-                  Private Sign-In Required (HTTP {probe.httpStatus ?? 302}) — Works on Same Device Only
+                  Private Sign-In Required (HTTP {probe.httpStatus ?? 302}) — Works on Your Device Only
                 </div>
                 <p className="text-amber-100/90 leading-relaxed">
-                  This URL redirects unauthenticated devices to login, so it works on your computer but fails on other people&apos;s phones. Use a published <code className="font-mono-tabular">ais-pre-...</code> or Cloud Run URL and open the Host Console from that same public URL.
+                  This URL requires developer sign-in, so phones get permission errors. Use your published Shared Public URL (<code className="font-mono-tabular">ais-pre-...</code> or Cloud Run URL) for both the Host Console and the audience join link so any phone on any network works.
                 </p>
               </div>
             </div>
@@ -402,7 +415,7 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
             >
               <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <div>
-                <strong>Link check could not reach audience page:</strong> {probe.detail || 'Verify server URL and network.'}
+                <strong>Link check could not reach audience page:</strong> {probe.detail || 'Verify your Shared Public URL above.'}
               </div>
             </div>
           )}
@@ -416,10 +429,10 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
               <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
               <div className="space-y-0.5">
                 <div className="font-semibold text-emerald-300">
-                  LIVE (HTTP {probe.httpStatus ?? 200}) — Ready for Audience Phones
+                  LIVE (HTTP {probe.httpStatus ?? 200}) — Works on Any Wi-Fi or Mobile Data
                 </div>
                 <div className="text-slate-400">
-                  Phones scanning this QR open the audience welcome screen directly with no Wi-Fi password or permission prompt. Ensure your Host Console is opened on this same live server URL so device sync stays live.
+                  Your Host Console opens at <code className="font-mono-tabular">/</code> while phones scanning this QR open the separate audience join link <code className="font-mono-tabular">/join/{show.joinCode}</code> from any network.
                 </div>
               </div>
             </div>
@@ -429,7 +442,7 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
             <div className="console-well border-slate-700/60 rounded p-2.5 flex items-start gap-2.5 text-[11px] text-slate-300">
               <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
               <div>
-                <strong>Direct Web URL Scan (Google Lens / Camera):</strong> Checking live phone reachability for <code className="font-mono-tabular">{joinUrl}</code>...
+                <strong>Shared Public Cloud Sync:</strong> Checking live phone reachability for <code className="font-mono-tabular">{joinUrl}</code>...
               </div>
             </div>
           )}
@@ -438,54 +451,29 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
             <div className="bg-amber-950/40 border border-amber-500/50 rounded p-2.5 flex items-start gap-2 text-[11px] text-amber-100">
               <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <div>
-                <strong>Private developer URL detected:</strong> <code className="font-mono-tabular">ais-dev-...</code> requires Google developer sign-in. Switch to the public <code className="font-mono-tabular">ais-pre-...</code> URL below so audience phones open it without permission errors.
+                <strong>Private developer URL detected:</strong> <code className="font-mono-tabular">ais-dev-...</code> requires Google sign-in. Use the Shared Public URL (<code className="font-mono-tabular">ais-pre-...</code>) so phones on any Wi-Fi or mobile network open it cleanly.
               </div>
             </div>
           )}
 
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center justify-between gap-2 text-slate-300">
-              <span>Public / Network Server Base URL</span>
-              <div className="flex flex-wrap items-center gap-2">
-                {detectedPublicInfo.suggestedSharedUrl && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const val = detectedPublicInfo.suggestedSharedUrl || '';
-                      setCustomRemoteBase(val);
-                      try {
-                        window.localStorage.setItem(CUSTOM_REMOTE_URL_KEY, val);
-                      } catch {}
-                    }}
-                    className="console-btn px-2 py-0.5 rounded text-[11px] text-amber-300"
-                  >
-                    Use Shared Public URL (ais-pre)
-                  </button>
-                )}
-                {networkInfo?.hasRealLanAddress &&
-                  networkInfo.lanAddresses.map((ip) => {
-                    const lanBase = `http://${ip}:${port}`;
-                    return (
-                      <button
-                        key={ip}
-                        type="button"
-                        onClick={() => {
-                          setCustomRemoteBase(lanBase);
-                          try {
-                            window.localStorage.setItem(CUSTOM_REMOTE_URL_KEY, lanBase);
-                          } catch {}
-                        }}
-                        className={`px-2 py-0.5 rounded text-[11px] font-mono-tabular ${
-                          effectivePublicBase === lanBase
-                            ? 'console-btn-amber font-semibold'
-                            : 'console-btn text-slate-300'
-                        }`}
-                      >
-                        Local Wi-Fi ({ip})
-                      </button>
-                    );
-                  })}
-              </div>
+              <span>Shared Public Base URL</span>
+              {detectedPublicInfo.suggestedSharedUrl && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const val = detectedPublicInfo.suggestedSharedUrl || '';
+                    setCustomRemoteBase(val);
+                    try {
+                      window.localStorage.setItem(CUSTOM_REMOTE_URL_KEY, val);
+                    } catch {}
+                  }}
+                  className="console-btn px-2 py-0.5 rounded text-[11px] text-amber-300"
+                >
+                  Reset to Shared Public URL (ais-pre)
+                </button>
+              )}
             </div>
             <input
               type="text"
@@ -496,31 +484,44 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
                 const val = e.target.value;
                 setCustomRemoteBase(val);
                 try {
-                  window.localStorage.setItem(CUSTOM_REMOTE_URL_KEY, val);
+                  if (val && !isPrivateOrLocalBase(val)) {
+                    window.localStorage.setItem(CUSTOM_REMOTE_URL_KEY, val);
+                  } else {
+                    window.localStorage.removeItem(CUSTOM_REMOTE_URL_KEY);
+                  }
                 } catch {}
               }}
               className="w-full console-well rounded px-2.5 py-1.5 font-mono-tabular text-slate-100 focus:outline-none focus:border-amber-400"
             />
           </div>
 
-          <div className="flex items-center gap-3 console-well rounded p-2.5">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 console-well rounded p-3">
             {qrDataUrl && (
               <img
                 src={qrDataUrl}
                 alt="Direct Join QR Code"
-                className="w-20 h-20 rounded shrink-0 border border-[#2B3342]"
+                className="w-24 h-24 rounded shrink-0 border border-[#2B3342]"
               />
             )}
-            <div className="space-y-1.5 min-w-0 flex-1">
-              <div className="font-semibold text-amber-400">Scan to Open Light Show URL</div>
+            <div className="space-y-2 min-w-0 flex-1 w-full">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-semibold text-amber-400">
+                  Separate Audience Join Link (For Phones)
+                </span>
+                <span className="text-[10px] font-mono-tabular text-slate-400">
+                  Host Console: / · Phones: /join/{show.joinCode}
+                </span>
+              </div>
               <div className="flex items-center gap-2 bg-[#12151B] border border-[#2A313E] rounded p-1.5">
                 <input
                   type="text"
                   readOnly
                   aria-label="Audience Join URL"
                   value={joinUrl}
-                  className="flex-1 bg-transparent font-mono-tabular text-slate-200 text-xs focus:outline-none min-w-0"
+                  className="flex-1 bg-transparent font-mono-tabular text-slate-100 text-xs focus:outline-none min-w-0"
                 />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -528,23 +529,23 @@ export const JoinPosterStudio: React.FC<JoinPosterStudioProps> = ({
                     setCopiedUrl(true);
                     setTimeout(() => setCopiedUrl(false), 1500);
                   }}
-                  className="console-btn flex items-center gap-1 px-2.5 py-1 rounded text-slate-200 shrink-0"
+                  className="console-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-slate-200"
                 >
                   {copiedUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedUrl ? 'Copied' : 'Copy'}</span>
+                  <span>{copiedUrl ? 'Copied Link' : 'Copy Join Link'}</span>
                 </button>
                 <a
-                  href={`/join/${show.id}`}
+                  href={`/join/${show.joinCode}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="console-btn-amber flex items-center gap-1 px-2.5 py-1 rounded font-semibold whitespace-nowrap shrink-0"
+                  className="console-btn-amber flex items-center gap-1 px-2.5 py-1.5 rounded font-semibold whitespace-nowrap"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  <span>Open Join</span>
+                  <span>Open Audience Page</span>
                 </a>
               </div>
               <p className="text-[11px] text-slate-400 leading-snug">
-                No-internet venue Wi-Fi tip: if your Wi-Fi network has no internet, run LUMENLINK locally (<code className="font-mono-tabular">npm run dev</code>) on that same Wi-Fi and enter <code className="font-mono-tabular">http://&lt;your-computer-LAN-IP&gt;:{port}</code> above—phones on that Wi-Fi can scan the QR in Google/Camera to open the URL directly without internet.
+                Works across the same Wi-Fi, different Wi-Fi networks, and 4G/5G mobile data using the Shared Public URL with real-time WebSocket + HTTPS cloud sync.
               </p>
             </div>
           </div>

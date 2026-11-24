@@ -145,3 +145,16 @@ test('ShowStore set_base_color preserves mid-transition continuity and clears bl
   assert.equal(show.lighting.colourTransition?.toColor, '#00FF00');
 });
 
+test('ShowStore regenerate_join_code rotates audience join code and resolves show via new code', () => {
+  const store = new ShowStore(null);
+  const show = store.getActiveShow();
+  const oldCode = show.joinCode;
+
+  const res = store.applyHostCommand(show.id, 'regenerate_join_code', {}, 2000);
+  assert.equal(res.showChanged, true);
+  assert.notEqual(res.show.joinCode, oldCode);
+  assert.equal(res.show.joinCode.length, 6);
+  assert.equal(store.getShow(res.show.joinCode).id, show.id);
+});
+
+

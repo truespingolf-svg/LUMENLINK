@@ -954,6 +954,30 @@ export class ShowStore {
         }
         break;
       }
+
+      case 'regenerate_join_code': {
+        const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let code = '';
+        for (let attempt = 0; attempt < 10; attempt++) {
+          let candidate = '';
+          for (let i = 0; i < 6; i++) {
+            candidate += alphabet[Math.floor(Math.random() * alphabet.length)];
+          }
+          const collision = Array.from(this.shows.values()).some(
+            (s) => s.joinCode.toUpperCase() === candidate || s.id.toUpperCase() === candidate,
+          );
+          if (!collision && candidate !== show.joinCode.toUpperCase()) {
+            code = candidate;
+            break;
+          }
+        }
+        if (code) {
+          show.joinCode = code;
+          show.updatedAtMs = nowMs;
+          showChanged = true;
+        }
+        break;
+      }
     }
 
     this.scheduleSave();

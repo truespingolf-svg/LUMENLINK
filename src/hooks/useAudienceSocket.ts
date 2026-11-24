@@ -109,6 +109,44 @@ export function useAudienceSocket(showIdParam?: string) {
     };
   }, [showIdParam]);
 
+  const registerViaHttp = useCallback(async () => {
+    if (unmountedRef.current) return;
+    try {
+      const res = await fetch('/api/public/audience/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          showId: showIdParam || undefined,
+          deviceId: deviceIdRef.current,
+          payload: {
+            name: customNameRef.current || undefined,
+            deviceType: detectDeviceType(),
+            orientation: getOrientation(),
+            batteryLevel: batteryLevelRef.current,
+            screenWidth: window.innerWidth,
+            screenHeight: window.innerHeight,
+          },
+        }),
+      });
+      if (!res.ok || unmountedRef.current) return;
+      const data = await res.json();
+      const offset = data.serverTimeMs ? data.serverTimeMs - Date.now() : 0;
+      setState((prev) => ({
+        ...prev,
+        joined: true,
+        connected: true,
+        reconnecting: false,
+        disconnectedByHost: false,
+        serverOffsetMs: offset,
+        show: data.show || prev.show,
+        device: data.device || prev.device,
+        allDevices: data.devices || prev.allDevices,
+      }));
+    } catch {
+      // Ignore transient HTTP fallback error
+    }
+  }, [showIdParam]);
+
   const connectAudience = useCallback(
     (nameOverride?: string) => {
       if (unmountedRef.current) return;
@@ -119,6 +157,9 @@ export function useAudienceSocket(showIdParam?: string) {
         wsRef.current.onclose = null;
         wsRef.current.close();
       }
+
+      // Immediately register over HTTP too so the screen renders live lighting instantly even if WSS is slow/blocked
+      registerViaHttp();
 
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const ws = new WebSocket(`${proto}//${window.location.host}/ws`);
@@ -235,8 +276,41 @@ export function useAudienceSocket(showIdParam?: string) {
         }
       };
     },
-    [showIdParam],
+    [registerViaHttp, showIdParam],
   );
+
+  // HTTP live polling fallback whenever joined & WebSocket is not open
+  useEffect(() => {
+    if (!state.joined || state.disconnectedByHost) return;
+    const isWsOpen = wsRef.current && wsRef.current.readyState === WebSocket.OPEN;
+    if (isWsOpen && state.connected) return;
+
+    const targetId = showIdParam || 'active';
+    const timer = window.setInterval(async () => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
+      try {
+        const res = await fetch(
+          `/api/public/show/${encodeURIComponent(targetId)}/live?deviceId=${encodeURIComponent(deviceIdRef.current)}`,
+        );
+        if (!res.ok || unmountedRef.current) return;
+        const data = await res.json();
+        const offset = data.serverTimeMs ? data.serverTimeMs - Date.now() : 0;
+        setState((prev) => ({
+          ...prev,
+          connected: true,
+          reconnecting: false,
+          serverOffsetMs: offset,
+          show: data.show || prev.show,
+          device: data.device || prev.device,
+          allDevices: data.devices || prev.allDevices,
+        }));
+      } catch {
+        // Ignore transient network poll failures
+      }
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [state.joined, state.connected, state.disconnectedByHost, showIdParam]);
 
   // Sync orientation and fullscreen changes immediately
   useEffect(() => {

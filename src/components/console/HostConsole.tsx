@@ -82,14 +82,6 @@ export const HostConsole: React.FC = () => {
     );
   }
 
-  if (!host.show) {
-    return (
-      <div className="min-h-screen bg-[#0B0D10] text-slate-300 flex items-center justify-center text-sm">
-        Connecting to LUMENLINK show server...
-      </div>
-    );
-  }
-
   const show = host.show;
   const onlineCount = host.devices.filter((d) => d.status === 'connected').length;
 
@@ -164,10 +156,24 @@ export const HostConsole: React.FC = () => {
         <div className="flex items-center gap-3 text-xs">
           <div className="flex items-center gap-1.5 font-mono-tabular console-well px-2.5 py-1 rounded">
             <Radio
-              className={`w-3.5 h-3.5 ${host.connected ? 'text-emerald-400' : 'text-red-400'}`}
+              className={`w-3.5 h-3.5 ${
+                host.connected
+                  ? 'text-emerald-400'
+                  : host.httpSynced
+                    ? 'text-sky-400'
+                    : 'text-amber-400'
+              }`}
             />
-            <span className={host.connected ? 'text-emerald-400' : 'text-red-400'}>
-              {host.connected ? 'SERVER SYNC' : 'RECONNECTING'}
+            <span
+              className={
+                host.connected
+                  ? 'text-emerald-400'
+                  : host.httpSynced
+                    ? 'text-sky-400'
+                    : 'text-amber-400'
+              }
+            >
+              {host.connected ? 'SERVER SYNC' : host.httpSynced ? 'HTTP SYNC' : 'SYNCING'}
             </span>
           </div>
           <label className="flex items-center gap-1.5 text-slate-300">

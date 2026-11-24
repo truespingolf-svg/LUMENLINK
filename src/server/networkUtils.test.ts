@@ -46,24 +46,21 @@ test('deriveSharedPreviewUrl identifies ais-dev URLs and suggests ais-pre public
   assert.equal(info.suggestedSharedUrl, 'https://ais-pre-abc123.europe-west3.run.app');
 });
 
-test('resolvePublicJoinBaseUrl resolves shared public URL, LAN IP on offline Wi-Fi, or custom URL', () => {
+test('resolvePublicJoinBaseUrl exclusively uses shared public URLs and ignores stale private LAN custom URLs when public URL is available', () => {
   assert.equal(
     resolvePublicJoinBaseUrl({
       publicUrl: 'https://ais-dev-xyz.europe-west3.run.app',
       fallbackOrigin: 'http://localhost:3000',
-      lanAddresses: [],
-      port: 3000,
     }),
     'https://ais-pre-xyz.europe-west3.run.app',
   );
   assert.equal(
     resolvePublicJoinBaseUrl({
-      publicUrl: 'http://localhost:3000',
+      customBaseUrl: 'http://192.168.1.42:3000',
+      publicUrl: 'https://ais-dev-xyz.europe-west3.run.app',
       fallbackOrigin: 'http://localhost:3000',
-      lanAddresses: ['192.168.1.42'],
-      port: 3000,
     }),
-    'http://192.168.1.42:3000',
+    'https://ais-pre-xyz.europe-west3.run.app',
   );
   assert.equal(
     resolvePublicJoinBaseUrl({
