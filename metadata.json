@@ -1,0 +1,6 @@
+{
+  "name": "LUMENLINK",
+  "description": "Professional wireless audience screen lighting control console with real-time WebSocket synchronization, pixel mapping, effect engine, cue playback, and QR poster studio.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
