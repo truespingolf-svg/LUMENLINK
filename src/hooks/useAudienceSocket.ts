@@ -335,26 +335,19 @@ export function useAudienceSocket(showIdParam?: string) {
       if (unmountedRef.current) return;
       if (nameOverride !== undefined) customNameRef.current = nameOverride;
       joinedRef.current = true;
+      httpHealthyRef.current = true;
       setState((prev) => ({
         ...prev,
-        joining: true,
+        joining: false,
         joinError: null,
+        joined: true,
+        connected: true,
+        reconnecting: false,
         disconnectedByHost: false,
       }));
 
       openWebSocket();
-      registerViaHttp().then((ok) => {
-        if (!ok && !wsConnectedRef.current && !unmountedRef.current) {
-          setState((prev) => {
-            if (prev.joined) return { ...prev, joining: false };
-            return {
-              ...prev,
-              joining: false,
-              joinError: 'Unable to reach show server right now. Check connection and tap Join Show again.',
-            };
-          });
-        }
-      });
+      registerViaHttp().catch(() => {});
     },
     [openWebSocket, registerViaHttp],
   );
