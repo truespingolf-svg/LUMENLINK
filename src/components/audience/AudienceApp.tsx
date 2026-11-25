@@ -43,11 +43,17 @@ export const AudienceApp: React.FC<AudienceAppProps> = ({ showIdParam }) => {
   // Auto-join when ?autostart=1 is provided (e.g., automated multi-device test clients)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('autostart') === '1' && !audience.joined && !audience.loadingInfo) {
+    if (
+      params.get('autostart') === '1' &&
+      !audience.joined &&
+      !audience.joining &&
+      !audience.joinError &&
+      !audience.loadingInfo
+    ) {
       const customName = params.get('name') || '';
       audience.joinShow(customName || undefined);
     }
-  }, [audience.joined, audience.loadingInfo, audience]);
+  }, [audience.joined, audience.joining, audience.joinError, audience.loadingInfo, audience]);
 
   // Brief connection confirmation banner on join
   useEffect(() => {
@@ -312,13 +318,25 @@ export const AudienceApp: React.FC<AudienceAppProps> = ({ showIdParam }) => {
         ? 'object-fill'
         : 'object-cover';
 
+  const initialColorHex =
+    audience.show && audience.device
+      ? renderFixtureOutput(
+          audience.device,
+          audience.allDevices.length > 0 ? audience.allDevices : [audience.device],
+          audience.show.groups,
+          audience.show.lighting,
+          Date.now() + audience.serverOffsetMs,
+        ).colorHex
+      : rendered.colorHex;
+
   return (
     <div
       ref={stageRef}
       data-testid="audience-light-surface"
-      data-color={rendered.colorHex}
+      data-color={initialColorHex}
       data-connected={String(audience.connected)}
       data-fullscreen={String(isFullscreen)}
+      style={{ backgroundColor: initialColorHex }}
       onClick={() => setShowControlsHint(true)}
       className={`fixed inset-0 w-screen h-screen bg-[#0B0D10] overflow-hidden select-none touch-none ${
         isFullscreen && !showControlsHint ? 'cursor-none' : ''

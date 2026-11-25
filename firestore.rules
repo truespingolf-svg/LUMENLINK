@@ -1,0 +1,218 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net: default deny everything
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidLiveShow(data) {
+      return data.keys().hasAll([
+        'id',
+        'name',
+        'joinCode',
+        'updatedAtMs',
+        'audienceSettings',
+        'groups',
+        'lighting',
+        'playback'
+      ])
+      && data.keys().hasOnly([
+        'id',
+        'name',
+        'joinCode',
+        'updatedAtMs',
+        'audienceSettings',
+        'groups',
+        'lighting',
+        'playback',
+        'sourceOrigin'
+      ])
+      && data.id is string && data.id.size() >= 1 && data.id.size() <= 128
+      && data.name is string && data.name.size() >= 1 && data.name.size() <= 160
+      && data.joinCode is string && data.joinCode.size() >= 1 && data.joinCode.size() <= 32
+      && data.updatedAtMs is number
+      && data.audienceSettings is map
+      && data.groups is list && data.groups.size() <= 50
+      && data.lighting is map
+      && data.lighting.baseColor is string && data.lighting.baseColor.size() <= 32
+      && data.lighting.masterIntensity is number && data.lighting.masterIntensity >= 0 && data.lighting.masterIntensity <= 100
+      && data.lighting.blackout is bool
+      && data.lighting.emergencyNeutral is bool
+      && data.lighting.freeze is bool
+      && data.lighting.layers is list && data.lighting.layers.size() <= 32
+      && data.playback is map
+      && (!('sourceOrigin' in data) || data.sourceOrigin == null || (data.sourceOrigin is string && data.sourceOrigin.size() <= 256));
+    }
+
+    function isValidAudienceDevice(data, showKey, deviceId) {
+      return data.keys().hasAll([
+        'id',
+        'showKey',
+        'fixtureNumber',
+        'name',
+        'deviceType',
+        'orientation',
+        'status',
+        'lastSeenMs',
+        'joinedAtMs',
+        'groupId',
+        'excluded',
+        'x',
+        'y',
+        'row',
+        'col'
+      ])
+      && data.keys().hasOnly([
+        'id',
+        'showKey',
+        'fixtureNumber',
+        'name',
+        'deviceType',
+        'orientation',
+        'status',
+        'batteryLevel',
+        'lastSeenMs',
+        'joinedAtMs',
+        'groupId',
+        'excluded',
+        'x',
+        'y',
+        'row',
+        'col',
+        'overrideColor',
+        'identifyUntilMs',
+        'screenWidth',
+        'screenHeight',
+        'isFullscreen',
+        'kickedAtMs'
+      ])
+      && data.id is string && data.id == deviceId && data.id.size() <= 128
+      && data.showKey is string && data.showKey == showKey && data.showKey.size() <= 128
+      && data.fixtureNumber is int && data.fixtureNumber >= 1 && data.fixtureNumber <= 10000
+      && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
+      && data.deviceType in ['smartphone', 'tablet', 'desktop', 'unknown']
+      && data.orientation in ['portrait', 'landscape']
+      && data.status in ['connected', 'disconnected']
+      && data.lastSeenMs is number
+      && data.joinedAtMs is number
+      && data.groupId is string && data.groupId.size() >= 1 && data.groupId.size() <= 64
+      && data.excluded is bool
+      && data.x is number && data.x >= 0 && data.x <= 1
+      && data.y is number && data.y >= 0 && data.y <= 1
+      && data.row is int && data.row >= 0 && data.row <= 200
+      && data.col is int && data.col >= 0 && data.col <= 200
+      && (!('batteryLevel' in data) || data.batteryLevel == null || (data.batteryLevel is number && data.batteryLevel >= 0 && data.batteryLevel <= 100))
+      && (!('overrideColor' in data) || data.overrideColor == null || (data.overrideColor is string && data.overrideColor.size() <= 32))
+      && (!('identifyUntilMs' in data) || data.identifyUntilMs is number)
+      && (!('screenWidth' in data) || data.screenWidth == null || (data.screenWidth is number && data.screenWidth >= 0 && data.screenWidth <= 10000))
+      && (!('screenHeight' in data) || data.screenHeight == null || (data.screenHeight is number && data.screenHeight >= 0 && data.screenHeight <= 10000))
+      && (!('isFullscreen' in data) || data.isFullscreen is bool)
+      && (!('kickedAtMs' in data) || data.kickedAtMs == null || data.kickedAtMs is number);
+    }
+
+    // Connection probe document
+    match /test/{docId} {
+      allow get: if docId == 'connection';
+    }
+
+    // Live shows broadcast state (keyed by joinCode or ACTIVE)
+    match /liveShows/{showKey} {
+      allow get: if isValidId(showKey);
+      allow list: if false;
+      allow create: if isValidId(showKey) && isValidLiveShow(incoming());
+      allow update: if isValidId(showKey)
+        && isValidLiveShow(incoming())
+        && (showKey == 'ACTIVE' || incoming().id == existing().id)
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'id',
+          'name',
+          'joinCode',
+          'updatedAtMs',
+          'audienceSettings',
+          'groups',
+          'lighting',
+          'playback',
+          'sourceOrigin'
+        ]);
+      allow delete: if false;
+
+      match /devices/{deviceId} {
+        allow get: if isValidId(showKey) && isValidId(deviceId);
+        allow list: if isValidId(showKey) && resource.data.showKey == showKey;
+        allow create: if isValidId(showKey)
+          && isValidId(deviceId)
+          && exists(/databases/$(database)/documents/liveShows/$(showKey))
+          && isValidAudienceDevice(incoming(), showKey, deviceId);
+        allow update: if isValidId(showKey)
+          && isValidId(deviceId)
+          && isValidAudienceDevice(incoming(), showKey, deviceId)
+          && incoming().id == existing().id
+          && incoming().showKey == existing().showKey
+          && incoming().joinedAtMs == existing().joinedAtMs
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name',
+              'deviceType',
+              'orientation',
+              'status',
+              'batteryLevel',
+              'lastSeenMs',
+              'screenWidth',
+              'screenHeight',
+              'isFullscreen',
+              'kickedAtMs'
+            ])
+            || incoming().diff(existing()).affectedKeys().hasOnly([
+              'fixtureNumber',
+              'name',
+              'status',
+              'groupId',
+              'excluded',
+              'x',
+              'y',
+              'row',
+              'col',
+              'overrideColor',
+              'identifyUntilMs',
+              'kickedAtMs'
+            ])
+            || incoming().diff(existing()).affectedKeys().hasOnly([
+              'fixtureNumber',
+              'name',
+              'deviceType',
+              'orientation',
+              'status',
+              'batteryLevel',
+              'lastSeenMs',
+              'groupId',
+              'excluded',
+              'x',
+              'y',
+              'row',
+              'col',
+              'overrideColor',
+              'identifyUntilMs',
+              'screenWidth',
+              'screenHeight',
+              'isFullscreen',
+              'kickedAtMs'
+            ])
+          );
+        allow delete: if isValidId(showKey) && isValidId(deviceId);
+      }
+    }
+  }
+}

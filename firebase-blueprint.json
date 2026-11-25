@@ -1,0 +1,175 @@
+{
+  "entities": {
+    "LiveShow": {
+      "title": "LiveShow",
+      "description": "Real-time broadcast lighting, playback, group, and audience settings state for a LUMENLINK show.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "joinCode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedAtMs": {
+          "type": "number"
+        },
+        "audienceSettings": {
+          "type": "object"
+        },
+        "groups": {
+          "type": "array"
+        },
+        "lighting": {
+          "type": "object"
+        },
+        "playback": {
+          "type": "object"
+        },
+        "sourceOrigin": {
+          "type": "string",
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "joinCode",
+        "updatedAtMs",
+        "audienceSettings",
+        "groups",
+        "lighting",
+        "playback"
+      ]
+    },
+    "AudienceDevice": {
+      "title": "AudienceDevice",
+      "description": "A live audience screen fixture connected to a LUMENLINK show.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "showKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "fixtureNumber": {
+          "type": "integer"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "deviceType": {
+          "type": "string",
+          "enum": ["smartphone", "tablet", "desktop", "unknown"]
+        },
+        "orientation": {
+          "type": "string",
+          "enum": ["portrait", "landscape"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["connected", "disconnected"]
+        },
+        "batteryLevel": {
+          "type": "number"
+        },
+        "lastSeenMs": {
+          "type": "number"
+        },
+        "joinedAtMs": {
+          "type": "number"
+        },
+        "groupId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "excluded": {
+          "type": "boolean"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "row": {
+          "type": "integer"
+        },
+        "col": {
+          "type": "integer"
+        },
+        "overrideColor": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "identifyUntilMs": {
+          "type": "number"
+        },
+        "screenWidth": {
+          "type": "number"
+        },
+        "screenHeight": {
+          "type": "number"
+        },
+        "isFullscreen": {
+          "type": "boolean"
+        },
+        "kickedAtMs": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "showKey",
+        "fixtureNumber",
+        "name",
+        "deviceType",
+        "orientation",
+        "status",
+        "lastSeenMs",
+        "joinedAtMs",
+        "groupId",
+        "excluded",
+        "x",
+        "y",
+        "row",
+        "col"
+      ]
+    }
+  },
+  "firestore": {
+    "/liveShows/{showKey}": {
+      "schema": {
+        "$ref": "#/entities/LiveShow"
+      },
+      "description": "Live show lighting and playback broadcast state keyed by uppercase join code or ACTIVE."
+    },
+    "/liveShows/{showKey}/devices/{deviceId}": {
+      "schema": {
+        "$ref": "#/entities/AudienceDevice"
+      },
+      "description": "Audience screen fixtures registered for a specific live show."
+    }
+  }
+}

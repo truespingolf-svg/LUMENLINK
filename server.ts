@@ -183,8 +183,17 @@ async function startServer(): Promise<void> {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
 
-  app.use('/api', (_req, res, next) => {
+  app.use('/api', (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    if (req.path.startsWith('/public/')) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      if (req.method === 'OPTIONS') {
+        res.status(204).end();
+        return;
+      }
+    }
     next();
   });
 
@@ -317,24 +326,38 @@ async function startServer(): Promise<void> {
     const nowMs = Date.now();
     const show = store.getShow(req.params.showId);
     const deviceId = typeof req.query.deviceId === 'string' ? req.query.deviceId : undefined;
+    let devicesChanged = false;
     if (deviceId) {
       const existing = store.getDevices(show.id).find((d) => d.id === deviceId);
       if (existing) {
+        const wasDisconnected = existing.status !== 'connected';
         store.updateAudienceMeta(show.id, deviceId, {}, nowMs);
+        if (wasDisconnected) devicesChanged = true;
       } else if (req.query.autoRegister === '1') {
         store.registerAudienceDevice(
           show.id,
           {
             deviceId,
-            name: typeof req.query.name === 'string' ? req.query.name : undefined,
-            deviceType: 'smartphone',
-            orientation: 'portrait',
+            name: typeof req.query.name === 'string' && req.query.name.trim() ? req.query.name.trim() : undefined,
+            deviceType:
+              req.query.deviceType === 'tablet' || req.query.deviceType === 'desktop'
+                ? req.query.deviceType
+                : 'smartphone',
+            orientation: req.query.orientation === 'landscape' ? 'landscape' : 'portrait',
           },
           nowMs,
         );
+        devicesChanged = true;
       }
     }
     const devices = store.getDevices(show.id);
+    if (devicesChanged) {
+      broadcastToShow(show.id, {
+        type: 'devices_update',
+        serverTimeMs: nowMs,
+        devices,
+      });
+    }
     const selfDevice = deviceId ? devices.find((d) => d.id === deviceId) || null : null;
     res.json({
       serverTimeMs: nowMs,

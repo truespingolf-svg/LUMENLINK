@@ -257,8 +257,8 @@ export function evaluateEffectLayer(
   const hasVisibleSecondary = hasSecondary && (palette[1] || '').toUpperCase() !== '#000000';
   const intensityScale = clamp(p.intensity / 100, 0, 1) * clamp(layer.opacity, 0, 1);
 
-  const activePool = allDevices.filter((d) => !d.excluded);
-  const pool = activePool.length > 0 ? activePool : allDevices;
+  const activePool = allDevices.filter((d) => d.status === 'connected' && !d.excluded);
+  const pool = activePool.length > 0 ? activePool : allDevices.filter((d) => !d.excluded);
   const activeCount = Math.max(1, pool.length);
   const foundIdx = pool.findIndex((d) => d.id === device.id);
   const orderedIdx = foundIdx >= 0 ? foundIdx : Math.max(0, allDevices.findIndex((d) => d.id === device.id));
