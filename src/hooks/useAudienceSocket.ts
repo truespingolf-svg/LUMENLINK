@@ -111,20 +111,21 @@ export function useAudienceSocket(showIdParam?: string) {
   const applyShowState = useCallback(
     (incomingShow: ShowFile, source: 'firestore' | 'ws' | 'http', serverTimeMs?: number) => {
       const incomingTs = showTimestamp(incomingShow);
-      const isCrossOriginPoll = source === 'http' && firestoreHealthyRef.current;
 
-      // Never allow an older HTTP poll from a separate container (ais-pre) to overwrite fresher Firestore/WS live state
-      if (isCrossOriginPoll && incomingTs <= lastShowUpdateTsRef.current) {
-        return;
-      }
-      if (source !== 'firestore' && lastShowSourceRef.current === 'firestore' && incomingTs < lastShowUpdateTsRef.current) {
-        return;
-      }
-      if (incomingTs > 0 && incomingTs < lastShowUpdateTsRef.current && lastShowSourceRef.current === source) {
-        return;
+      // Firestore onSnapshot only fires when the remote show document changed, so always honor it
+      if (source !== 'firestore') {
+        if (firestoreHealthyRef.current && incomingTs <= lastShowUpdateTsRef.current) {
+          return;
+        }
+        if (lastShowSourceRef.current === 'firestore' && incomingTs < lastShowUpdateTsRef.current) {
+          return;
+        }
+        if (incomingTs > 0 && incomingTs < lastShowUpdateTsRef.current && lastShowSourceRef.current === source) {
+          return;
+        }
       }
 
-      if (incomingTs > lastShowUpdateTsRef.current) {
+      if (source === 'firestore' || incomingTs > lastShowUpdateTsRef.current) {
         lastShowUpdateTsRef.current = incomingTs;
       }
       lastShowSourceRef.current = source;
@@ -314,7 +315,9 @@ export function useAudienceSocket(showIdParam?: string) {
               allDevices: devices.length > 0 ? devices : prev.allDevices,
             }));
           },
-          () => {},
+          (err) => {
+            console.warn('Firestore devices listener warning:', err.message);
+          },
         );
 
         firestoreUnsubsRef.current = [unsubShow, unsubDevices];
@@ -575,21 +578,21 @@ export function useAudienceSocket(showIdParam?: string) {
       wsConnectedRef.current = false;
       if (heartbeatTimerRef.current) window.clearInterval(heartbeatTimerRef.current);
       const byHost = ev.code === 4001;
-      setState((prev) => ({
-        ...prev,
-        connected: byHost
-          ? false
-          : (httpHealthyRef.current || firestoreHealthyRef.current) && prev.joined
-            ? true
-            : false,
-        reconnecting: !byHost && joinedRef.current && !httpHealthyRef.current && !firestoreHealthyRef.current,
-        disconnectedByHost: byHost,
-      }));
-      if (!unmountedRef.current && joinedRef.current && !byHost) {
+      setState((prev) => {
+        if (!prev.joined && !byHost) return prev;
+        const stillHealthy = httpHealthyRef.current || firestoreHealthyRef.current;
+        return {
+          ...prev,
+          connected: byHost ? false : stillHealthy,
+          reconnecting: !byHost && joinedRef.current && !stillHealthy,
+          disconnectedByHost: byHost,
+        };
+      });
+      if (!unmountedRef.current && joinedRef.current && !byHost && !firestoreHealthyRef.current) {
         if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = window.setTimeout(() => {
           openWebSocket();
-        }, httpHealthyRef.current || firestoreHealthyRef.current ? 5000 : 1800);
+        }, httpHealthyRef.current ? 8000 : 2500);
       }
     };
   }, [applyShowState, showIdParam]);

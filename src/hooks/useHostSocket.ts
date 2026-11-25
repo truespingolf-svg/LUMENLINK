@@ -161,40 +161,41 @@ function mergeDeviceLists(
 
 const IMMEDIATE_ACTIONS = new Set([
   'set_base_color',
-  'apply_gradient',
-  'run_colour_transition',
-  'toggle_blackout',
-  'toggle_emergency_neutral',
-  'toggle_freeze',
-  'set_strobe_override',
-  'trigger_cue',
-  'go_next_cue',
-  'go_prev_cue',
-  'stop_playback',
+  'start_colour_transition',
+  'set_blackout',
+  'set_emergency_neutral',
+  'set_freeze',
+  'cue_go',
+  'cue_next',
+  'cue_back',
+  'cue_goto',
+  'cue_pause',
+  'cue_stop',
   'upsert_effect_layer',
   'remove_effect_layer',
   'stop_all_effects',
   'release_all',
-  'play_timeline',
-  'stop_timeline',
+  'timeline_play',
+  'timeline_pause',
+  'timeline_stop',
+  'timeline_seek',
   'regenerate_join_code',
   'update_audience_settings',
   'create_group',
   'update_group',
   'delete_group',
   'set_media_projection',
-  'stop_media_projection',
+  'clear_media_projection',
 ]);
 
 const DEVICE_EDIT_ACTIONS = new Set([
-  'assign_device_group',
-  'exclude_device',
-  'override_device_color',
-  'update_fixture_position',
+  'update_device',
+  'bulk_update_devices',
+  'reorder_device',
   'identify_devices',
-  'auto_grid_layout',
   'apply_layout_preset',
-  'disconnect_device',
+  'disconnect_devices',
+  'release_all',
 ]);
 
 export function useHostSocket() {
@@ -222,6 +223,8 @@ export function useHostSocket() {
   const authRetryTimerRef = useRef<number | null>(null);
   const firestorePublishTimerRef = useRef<number | null>(null);
   const pendingFirestoreShowRef = useRef<ShowFile | null>(null);
+  const firestorePublishInFlightRef = useRef<boolean>(false);
+  const firestorePublishDirtyRef = useRef<boolean>(false);
   const unmountedRef = useRef(false);
   const lastLocalMutationAtRef = useRef<number>(0);
   const localMutationSeqRef = useRef<number>(0);
@@ -235,6 +238,15 @@ export function useHostSocket() {
   const hostEditedDevicesRef = useRef<Map<string, AudienceDevice>>(new Map());
   const firestoreJoinKeyMapRef = useRef<Map<string, string>>(new Map());
 
+  const currentShowRef = useRef<ShowFile>(state.show);
+  const currentDevicesRef = useRef<AudienceDevice[]>(state.devices);
+  const showsListRef = useRef<ShowFile[]>(state.showsList);
+  const mediaAssetsRef = useRef<MediaAsset[]>(state.mediaAssets);
+  currentShowRef.current = state.show;
+  currentDevicesRef.current = state.devices;
+  showsListRef.current = state.showsList;
+  mediaAssetsRef.current = state.mediaAssets;
+
   const rebuildMergedDevices = useCallback(() => {
     const merged = mergeDeviceLists(
       serverDevicesRef.current,
@@ -242,6 +254,7 @@ export function useHostSocket() {
       firestoreActiveDevicesRef.current,
       hostEditedDevicesRef.current,
     );
+    currentDevicesRef.current = merged;
     if (!unmountedRef.current) {
       setState((prev) => ({ ...prev, devices: merged }));
     }
@@ -252,13 +265,25 @@ export function useHostSocket() {
     pendingFirestoreShowRef.current = show;
     joinCodeRef.current = show.joinCode || joinCodeRef.current;
 
-    const flush = () => {
+    const flush = async () => {
       firestorePublishTimerRef.current = null;
-      const target = pendingFirestoreShowRef.current;
-      if (!target) return;
-      publishShowToFirestore(target, window.location.origin).catch(() => {
-        // Keep console smooth even if offline
-      });
+      if (firestorePublishInFlightRef.current) {
+        firestorePublishDirtyRef.current = true;
+        return;
+      }
+      firestorePublishInFlightRef.current = true;
+      try {
+        do {
+          firestorePublishDirtyRef.current = false;
+          const target = pendingFirestoreShowRef.current;
+          if (!target) break;
+          await publishShowToFirestore(target, window.location.origin).catch((err) => {
+            console.warn('Firestore show publish warning:', err instanceof Error ? err.message : err);
+          });
+        } while (firestorePublishDirtyRef.current && !unmountedRef.current);
+      } finally {
+        firestorePublishInFlightRef.current = false;
+      }
     };
 
     if (immediate) {
@@ -266,9 +291,11 @@ export function useHostSocket() {
         window.clearTimeout(firestorePublishTimerRef.current);
         firestorePublishTimerRef.current = null;
       }
-      flush();
+      void flush();
     } else if (!firestorePublishTimerRef.current) {
-      firestorePublishTimerRef.current = window.setTimeout(flush, 55);
+      firestorePublishTimerRef.current = window.setTimeout(() => {
+        void flush();
+      }, 45);
     }
   }, []);
 
@@ -468,8 +495,10 @@ export function useHostSocket() {
 
           if (msg.type === 'welcome_sync') {
             wsRegisteredRef.current = true;
-            if (msg.show) {
+            const hasRecentLocalEdit = Date.now() - lastLocalMutationAtRef.current < 1500;
+            if (!hasRecentLocalEdit && msg.show) {
               showIdRef.current = msg.show.id;
+              currentShowRef.current = msg.show;
               cacheShowSnapshot(msg.show);
               scheduleFirestoreShowSync(msg.show, true);
             }
@@ -482,12 +511,13 @@ export function useHostSocket() {
               firestoreActiveDevicesRef.current,
               hostEditedDevicesRef.current,
             );
+            currentDevicesRef.current = merged;
             setState((prev) => ({
               ...prev,
               connected: true,
               httpSynced: true,
               serverOffsetMs: offset,
-              show: msg.show || prev.show,
+              show: !hasRecentLocalEdit && msg.show ? msg.show : prev.show,
               devices: merged,
               mediaAssets: msg.mediaAssets || prev.mediaAssets,
             }));
@@ -553,8 +583,8 @@ export function useHostSocket() {
       subscribeShowDevicesInFirestore(
         joinKey,
         (list) => handleSnapshot(list, joinKey, true),
-        () => {
-          // Keep Express/WS working cleanly if Firestore is temporarily unreachable
+        (err) => {
+          console.warn(`Firestore device subscription warning (${joinKey}):`, err.message);
         },
       ),
     );
@@ -563,7 +593,9 @@ export function useHostSocket() {
         subscribeShowDevicesInFirestore(
           'ACTIVE',
           (list) => handleSnapshot(list, 'ACTIVE', false),
-          () => {},
+          (err) => {
+            console.warn('Firestore device subscription warning (ACTIVE):', err.message);
+          },
         ),
       );
     }
@@ -674,72 +706,92 @@ export function useHostSocket() {
     (action: string, payload: Record<string, unknown> = {}) => {
       lastLocalMutationAtRef.current = Date.now();
       const cmdSeq = ++localMutationSeqRef.current;
-      const targetShowId = showIdRef.current || state.show.id;
-      let nextShowForSync: ShowFile | null = null;
-      let nextDevicesForSync: AudienceDevice[] | null = null;
+      const targetShowId = showIdRef.current || currentShowRef.current.id;
 
-      // Apply optimistically at 0ms so console buttons, colour pickers, cues & sliders always reflect immediately
-      setState((prev) => {
-        const outcome = applyHostCommandToState({
-          show: prev.show,
-          devices: prev.devices,
-          allShows: prev.showsList,
-          mediaAssets: prev.mediaAssets,
-          action,
-          payload,
-          nowMs: Date.now() + serverOffsetRef.current,
-          mutateInPlace: false,
-        });
-        cacheShowSnapshot(outcome.show);
-        nextShowForSync = outcome.show;
-        nextDevicesForSync = outcome.devices;
+      const previousDevices = currentDevicesRef.current;
 
-        if (DEVICE_EDIT_ACTIONS.has(action)) {
-          for (const d of outcome.devices) {
-            hostEditedDevicesRef.current.set(d.id, d);
-          }
-        }
-
-        return {
-          ...prev,
-          show: outcome.show,
-          devices: outcome.devices,
-          showsList: prev.showsList.map((s) => (s.id === outcome.show.id ? outcome.show : s)),
-        };
+      // Compute synchronously so Firestore sync ALWAYS sees the new state immediately (not deferred by React 19 batching)
+      const outcome = applyHostCommandToState({
+        show: currentShowRef.current,
+        devices: previousDevices,
+        allShows: showsListRef.current,
+        mediaAssets: mediaAssetsRef.current,
+        action,
+        payload,
+        nowMs: Date.now() + serverOffsetRef.current,
+        mutateInPlace: false,
       });
 
-      queueMicrotask(() => {
-        if (nextShowForSync) {
-          scheduleFirestoreShowSync(nextShowForSync, IMMEDIATE_ACTIONS.has(action));
+      currentShowRef.current = outcome.show;
+      currentDevicesRef.current = outcome.devices;
+      showsListRef.current = showsListRef.current.map((s) =>
+        s.id === outcome.show.id ? outcome.show : s,
+      );
+      cacheShowSnapshot(outcome.show);
+
+      if (DEVICE_EDIT_ACTIONS.has(action)) {
+        for (const d of outcome.devices) {
+          hostEditedDevicesRef.current.set(d.id, d);
         }
-        if (DEVICE_EDIT_ACTIONS.has(action) && nextDevicesForSync) {
-          const fallbackKey = normalizeShowKey(nextShowForSync?.joinCode || state.show.joinCode);
-          const kickedIds = new Set(
-            action === 'disconnect_device' && typeof payload.deviceId === 'string'
-              ? [payload.deviceId]
-              : [],
-          );
-          for (const d of nextDevicesForSync) {
-            const devKey = firestoreJoinKeyMapRef.current.get(d.id) || fallbackKey;
-            if (firestoreJoinDevicesRef.current.some((x) => x.id === d.id) || firestoreActiveDevicesRef.current.some((x) => x.id === d.id)) {
-              if (action === 'disconnect_device' && kickedIds.has(d.id)) {
-                updateHostManagedDeviceInFirestore(devKey, d, Date.now()).catch(() => {});
-              } else {
-                updateHostManagedDeviceInFirestore(devKey, d, null).catch(() => {});
-              }
-            }
+        for (const kickedId of outcome.disconnectDeviceIds || []) {
+          hostEditedDevicesRef.current.delete(kickedId);
+        }
+      }
+
+      setState((prev) => ({
+        ...prev,
+        show: outcome.show,
+        devices: outcome.devices,
+        showsList: prev.showsList.map((s) => (s.id === outcome.show.id ? outcome.show : s)),
+      }));
+
+      // Publish live show state to Firestore right away
+      scheduleFirestoreShowSync(outcome.show, IMMEDIATE_ACTIONS.has(action));
+
+      if (DEVICE_EDIT_ACTIONS.has(action)) {
+        const fallbackKey = normalizeShowKey(outcome.show.joinCode);
+        const nowKickMs = Date.now();
+        for (const kickedId of outcome.disconnectDeviceIds || []) {
+          const prevDev = previousDevices.find((x) => x.id === kickedId);
+          const devKey = firestoreJoinKeyMapRef.current.get(kickedId) || fallbackKey;
+          const isInFirestore =
+            firestoreJoinDevicesRef.current.some((x) => x.id === kickedId) ||
+            firestoreActiveDevicesRef.current.some((x) => x.id === kickedId);
+          if (isInFirestore && prevDev) {
+            updateHostManagedDeviceInFirestore(
+              devKey,
+              { ...prevDev, status: 'disconnected' },
+              nowKickMs,
+            ).catch((err) => {
+              console.warn('Firestore device kick warning:', err instanceof Error ? err.message : err);
+            });
           }
         }
-        if (action === 'clear_offline_devices') {
-          const fallbackKey = normalizeShowKey(nextShowForSync?.joinCode || state.show.joinCode);
-          for (const rd of [...firestoreJoinDevicesRef.current, ...firestoreActiveDevicesRef.current]) {
-            if (rd.status === 'disconnected' || Date.now() - (rd.lastSeenMs || 0) > DEVICE_HEARTBEAT_TIMEOUT_MS) {
-              const devKey = firestoreJoinKeyMapRef.current.get(rd.id) || fallbackKey;
-              removeDeviceFromFirestore(devKey, rd.id).catch(() => {});
-            }
+        for (const d of outcome.devices) {
+          const devKey = firestoreJoinKeyMapRef.current.get(d.id) || fallbackKey;
+          const isInFirestore =
+            firestoreJoinDevicesRef.current.some((x) => x.id === d.id) ||
+            firestoreActiveDevicesRef.current.some((x) => x.id === d.id);
+          if (isInFirestore) {
+            updateHostManagedDeviceInFirestore(devKey, d, null).catch((err) => {
+              console.warn('Firestore device update warning:', err instanceof Error ? err.message : err);
+            });
           }
         }
-      });
+      }
+
+      if (action === 'clear_offline_devices') {
+        const fallbackKey = normalizeShowKey(outcome.show.joinCode);
+        for (const rd of [...firestoreJoinDevicesRef.current, ...firestoreActiveDevicesRef.current]) {
+          if (
+            rd.status === 'disconnected' ||
+            Date.now() - (rd.lastSeenMs || 0) > DEVICE_HEARTBEAT_TIMEOUT_MS
+          ) {
+            const devKey = firestoreJoinKeyMapRef.current.get(rd.id) || fallbackKey;
+            removeDeviceFromFirestore(devKey, rd.id).catch(() => {});
+          }
+        }
+      }
 
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN && wsRegisteredRef.current) {
@@ -760,7 +812,7 @@ export function useHostSocket() {
         authFnRef.current();
       }
     },
-    [scheduleFirestoreShowSync, sendCommandViaHttp, state.show.id, state.show.joinCode],
+    [scheduleFirestoreShowSync, sendCommandViaHttp],
   );
 
   const createShow = useCallback(

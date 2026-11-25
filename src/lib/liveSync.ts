@@ -6,9 +6,11 @@ import {
   getDocFromServer,
   getDocs,
   onSnapshot,
+  query,
   setDoc,
   Unsubscribe,
   updateDoc,
+  where,
 } from 'firebase/firestore';
 import { AudienceDevice, ShowFile } from '../shared/types';
 import { createBlankShow } from '../engine/shows';
@@ -58,9 +60,11 @@ export function buildFirestoreShowPayload(show: ShowFile, sourceOrigin?: string)
     id: String(show.id || 'demo-arena-show').slice(0, 128),
     name: String(show.name || 'LUMENLINK Show').slice(0, 160),
     joinCode: String(show.joinCode || 'LUMEN1').toUpperCase().slice(0, 32),
-    updatedAtMs: typeof show.lighting?.updatedAtMs === 'number'
-      ? Math.max(show.updatedAtMs || 0, show.lighting.updatedAtMs)
-      : show.updatedAtMs || Date.now(),
+    updatedAtMs: Math.max(
+      Date.now(),
+      typeof show.lighting?.updatedAtMs === 'number' ? show.lighting.updatedAtMs : 0,
+      show.updatedAtMs || 0,
+    ),
     audienceSettings: show.audienceSettings,
     groups: show.groups.slice(0, 50),
     lighting: {
@@ -135,14 +139,16 @@ export async function publishShowToFirestore(show: ShowFile, sourceOrigin?: stri
   await testConnection();
   const payload = buildFirestoreShowPayload(show, sourceOrigin);
   const keys = Array.from(new Set([normalizeShowKey(show.joinCode), 'ACTIVE']));
-  for (const key of keys) {
-    const path = `liveShows/${key}`;
-    try {
-      await setDoc(doc(db, 'liveShows', key), payload);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
-    }
-  }
+  await Promise.all(
+    keys.map(async (key) => {
+      const path = `liveShows/${key}`;
+      try {
+        await setDoc(doc(db, 'liveShows', key), payload);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, path);
+      }
+    }),
+  );
 }
 
 export async function fetchLiveShowFromFirestore(showKeyRaw?: string): Promise<{
@@ -200,31 +206,39 @@ export async function registerOrUpdateAudienceDeviceInFirestore(params: {
     const existingSnap = await getDoc(ref);
     if (existingSnap.exists()) {
       const existing = existingSnap.data() as FirestoreDeviceDoc;
-      const merged = buildFirestoreDevicePayload(
+      const nextName = (params.name?.trim() || existing.name || `Fixture ${String(existing.fixtureNumber || 1).padStart(3, '0')}`).slice(0, 80);
+      const telemetryPatch = stripUndefined({
+        name: nextName,
+        deviceType: params.deviceType,
+        orientation: params.orientation,
+        status: 'connected' as const,
+        batteryLevel: typeof params.batteryLevel === 'number' ? Math.max(0, Math.min(100, params.batteryLevel)) : null,
+        lastSeenMs: nowMs,
+        screenWidth: Math.max(0, Math.min(10000, Math.round(params.screenWidth))),
+        screenHeight: Math.max(0, Math.min(10000, Math.round(params.screenHeight))),
+        isFullscreen: Boolean(params.isFullscreen),
+        kickedAtMs: null,
+      });
+      await updateDoc(ref, telemetryPatch);
+      return buildFirestoreDevicePayload(
         key,
         {
           ...existing,
-          name: params.name?.trim() || existing.name,
-          deviceType: params.deviceType,
-          orientation: params.orientation,
-          status: 'connected',
-          batteryLevel: params.batteryLevel,
-          lastSeenMs: nowMs,
-          screenWidth: params.screenWidth,
-          screenHeight: params.screenHeight,
-          isFullscreen: params.isFullscreen,
+          ...telemetryPatch,
+          screenWidth: telemetryPatch.screenWidth,
+          screenHeight: telemetryPatch.screenHeight,
         },
         null,
       );
-      await setDoc(ref, merged);
-      return merged;
     }
 
     // Compute a reasonable initial slot index among currently listed devices
     let existingCount = 0;
     let maxNum = 0;
     try {
-      const listSnap = await getDocs(collection(db, 'liveShows', key, 'devices'));
+      const listSnap = await getDocs(
+        query(collection(db, 'liveShows', key, 'devices'), where('showKey', '==', key)),
+      );
       existingCount = listSnap.size;
       listSnap.forEach((d) => {
         const item = d.data() as Partial<FirestoreDeviceDoc>;
@@ -381,8 +395,9 @@ export function subscribeShowDevicesInFirestore(
 ): Unsubscribe {
   const key = normalizeShowKey(showKeyRaw);
   const path = `liveShows/${key}/devices`;
+  const devicesQuery = query(collection(db, 'liveShows', key, 'devices'), where('showKey', '==', key));
   return onSnapshot(
-    collection(db, 'liveShows', key, 'devices'),
+    devicesQuery,
     (snap) => {
       const list: FirestoreDeviceDoc[] = [];
       snap.forEach((d) => {
