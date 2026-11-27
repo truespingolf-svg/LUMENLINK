@@ -58,7 +58,7 @@ export const ShowsSettingsPanel: React.FC<ShowsSettingsPanelProps> = ({
   return (
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 text-xs">
       {/* Show File Management */}
-      <div className="xl:col-span-6 bg-[#12151B] border border-[#232934] rounded p-4 space-y-4">
+      <div className="xl:col-span-6 console-panel rounded-md p-4 space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <FolderOpen className="w-4 h-4 text-amber-400" />
@@ -66,7 +66,7 @@ export const ShowsSettingsPanel: React.FC<ShowsSettingsPanelProps> = ({
               Show File Management
             </h3>
           </div>
-          <label className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-[#1A1F28] border border-[#2B3342] text-slate-200 cursor-pointer hover:bg-[#232A36]">
+          <label className="console-btn flex items-center gap-1 px-2.5 py-1.5 rounded text-slate-200 cursor-pointer">
             <Upload className="w-3.5 h-3.5" />
             <span>Import Show JSON</span>
             <input type="file" accept=".json" onChange={handleImportFile} className="hidden" />
@@ -74,7 +74,7 @@ export const ShowsSettingsPanel: React.FC<ShowsSettingsPanelProps> = ({
         </div>
 
         {importStatus && (
-          <div className="px-3 py-2 rounded bg-[#0D1015] border border-amber-500/40 text-amber-200">
+          <div className="px-3 py-2 rounded console-well border-amber-500/40 text-amber-200">
             {importStatus}
           </div>
         )}
@@ -95,11 +95,11 @@ export const ShowsSettingsPanel: React.FC<ShowsSettingsPanelProps> = ({
             placeholder="New show name (e.g., Arena Tour 2026)..."
             value={newShowName}
             onChange={(e) => setNewShowName(e.target.value)}
-            className="flex-1 bg-[#090B0E] border border-[#2A313E] rounded px-2.5 py-1.5 text-slate-100"
+            className="flex-1 console-well rounded px-2.5 py-1.5 text-slate-100"
           />
           <button
             type="submit"
-            className="flex items-center gap-1 px-3 py-1.5 rounded font-semibold bg-amber-500 text-slate-950 hover:bg-amber-400"
+            className="console-btn-amber flex items-center gap-1 px-3 py-1.5 rounded font-semibold"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Create Show</span>
@@ -121,11 +121,11 @@ export const ShowsSettingsPanel: React.FC<ShowsSettingsPanelProps> = ({
             aria-label="Rename Active Show"
             value={renameDraft}
             onChange={(e) => setRenameDraft(e.target.value)}
-            className="flex-1 bg-[#090B0E] border border-[#2A313E] rounded px-2.5 py-1.5 text-slate-100"
+            className="flex-1 console-well rounded px-2.5 py-1.5 text-slate-100"
           />
           <button
             type="submit"
-            className="px-3 py-1.5 rounded bg-[#1A1F28] border border-[#2B3342] text-slate-200 hover:bg-[#232A36]"
+            className="console-btn px-3 py-1.5 rounded text-slate-200"
           >
             Rename Active
           </button>
@@ -198,7 +198,7 @@ export const ShowsSettingsPanel: React.FC<ShowsSettingsPanelProps> = ({
 
       {/* Audience Welcome Experience + Operations Guide */}
       <div className="xl:col-span-6 flex flex-col gap-4">
-        <div className="bg-[#12151B] border border-[#232934] rounded p-4 space-y-3">
+        <div className="console-panel rounded-md p-4 space-y-3">
           <h3 className="font-display text-sm font-semibold tracking-wider uppercase text-slate-100">
             Audience Welcome Screen Customisation
           </h3>
@@ -213,7 +213,7 @@ export const ShowsSettingsPanel: React.FC<ShowsSettingsPanelProps> = ({
                     settings: { eventTitle: e.target.value },
                   })
                 }
-                className="bg-[#090B0E] border border-[#2A313E] rounded px-2.5 py-1.5 text-slate-100"
+                className="console-well rounded px-2.5 py-1.5 text-slate-100"
               />
             </label>
             <label className="flex flex-col gap-1 text-slate-300">
@@ -240,7 +240,7 @@ export const ShowsSettingsPanel: React.FC<ShowsSettingsPanelProps> = ({
                   settings: { welcomeMessage: e.target.value },
                 })
               }
-              className="bg-[#090B0E] border border-[#2A313E] rounded px-2.5 py-1.5 text-slate-100"
+              className="console-well rounded px-2.5 py-1.5 text-slate-100"
             />
           </label>
           <label className="flex flex-col gap-1 text-slate-300">
@@ -253,13 +253,13 @@ export const ShowsSettingsPanel: React.FC<ShowsSettingsPanelProps> = ({
                   settings: { instructions: e.target.value },
                 })
               }
-              className="bg-[#090B0E] border border-[#2A313E] rounded px-2.5 py-1.5 text-slate-100"
+              className="console-well rounded px-2.5 py-1.5 text-slate-100"
             />
           </label>
         </div>
 
         {/* Setup & Operations Manual */}
-        <div className="bg-[#12151B] border border-[#232934] rounded p-4 space-y-2.5 text-slate-300 leading-relaxed">
+        <div className="console-panel rounded-md p-4 space-y-2.5 text-slate-300 leading-relaxed">
           <div className="flex items-center gap-2">
             <BookOpen className="w-4 h-4 text-amber-400" />
             <h3 className="font-display text-sm font-semibold tracking-wider uppercase text-slate-100">

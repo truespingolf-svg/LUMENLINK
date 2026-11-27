@@ -239,8 +239,8 @@ export const AudienceApp: React.FC<AudienceAppProps> = ({ showIdParam }) => {
     const brandColor = settings?.brandColor || '#F59E0B';
 
     return (
-      <div className="min-h-screen min-h-[100dvh] bg-[#090B0E] text-slate-100 flex flex-col items-center justify-center p-6">
-        <div className="w-full max-w-md bg-[#12151B] border border-[#232934] rounded-xl p-6 sm:p-8 space-y-6 shadow-2xl">
+      <div className="min-h-screen min-h-[100dvh] bg-[#07090D] text-slate-100 flex flex-col items-center justify-center p-6">
+        <div className="w-full max-w-md console-panel rounded-xl p-6 sm:p-8 space-y-6">
           <div className="space-y-2 text-center">
             <div
               className="font-display text-xs font-bold tracking-[0.25em] uppercase"
@@ -253,7 +253,7 @@ export const AudienceApp: React.FC<AudienceAppProps> = ({ showIdParam }) => {
             </h1>
           </div>
 
-          <div className="bg-[#0D1015] border border-[#222833] rounded-lg p-4 text-sm text-slate-200 leading-relaxed text-center">
+          <div className="console-well rounded-lg p-4 text-sm text-slate-200 leading-relaxed text-center">
             {settings?.welcomeMessage ||
               'Welcome to the synchronised wireless light show. Join below to turn your screen into a live stage lighting pixel.'}
           </div>
@@ -279,7 +279,7 @@ export const AudienceApp: React.FC<AudienceAppProps> = ({ showIdParam }) => {
                 placeholder="e.g., Row A Seat 12"
                 value={deviceNameInput}
                 onChange={(e) => setDeviceNameInput(e.target.value)}
-                className="mt-1.5 w-full bg-[#090B0E] border border-[#2A313E] rounded-lg px-3 py-2.5 text-sm text-slate-100"
+                className="mt-1.5 w-full console-well rounded-lg px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-amber-400"
               />
             </label>
 

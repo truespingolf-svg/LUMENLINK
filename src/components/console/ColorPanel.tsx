@@ -141,14 +141,14 @@ export const ColorPanel: React.FC<ColorPanelProps> = ({
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
       {/* Left: Wheel & Sliders */}
       <div className="lg:col-span-5 console-panel rounded-md p-4 flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <Palette className="w-4 h-4 text-amber-400" />
-            <h3 className="font-display text-sm font-semibold tracking-wider uppercase text-slate-100">
+            <h3 className="font-display text-sm font-semibold tracking-wider uppercase text-slate-100 whitespace-nowrap">
               Live Colour Programmer
             </h3>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 ml-auto">
             <label className="flex items-center gap-1 text-[11px] text-slate-400">
               <span>Fade</span>
               <input
@@ -159,12 +159,12 @@ export const ColorPanel: React.FC<ColorPanelProps> = ({
                 step={100}
                 value={solidFadeMs}
                 onChange={(e) => setSolidFadeMs(Math.max(0, Number(e.target.value)))}
-                className="w-16 console-well rounded px-1.5 py-1 text-xs font-mono-tabular text-slate-200"
+                className="w-14 console-well rounded px-1.5 py-1 text-xs font-mono-tabular text-slate-200"
               />
               <span>ms</span>
             </label>
             <span
-              className="w-6 h-6 rounded border border-slate-500 shadow-inner"
+              className="w-6 h-6 rounded border border-slate-500 shadow-inner shrink-0"
               style={{ backgroundColor: baseColor, boxShadow: `0 0 10px ${baseColor}44` }}
             />
             <input
@@ -178,7 +178,7 @@ export const ColorPanel: React.FC<ColorPanelProps> = ({
                   applyColor(v.toUpperCase());
                 }
               }}
-              className="w-24 console-well rounded px-2 py-1 text-xs font-mono-tabular text-slate-100"
+              className="w-20 console-well rounded px-2 py-1 text-xs font-mono-tabular text-slate-100"
             />
           </div>
         </div>
@@ -418,7 +418,7 @@ export const ColorPanel: React.FC<ColorPanelProps> = ({
                 Colour Temperature
               </h3>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-1 2xl:grid-cols-2 gap-1.5">
               {COLOUR_TEMPERATURE_PRESETS.map((ct) => (
                 <button
                   key={ct.kelvin}
@@ -426,7 +426,7 @@ export const ColorPanel: React.FC<ColorPanelProps> = ({
                   onClick={() => applyColor(ct.hex)}
                   className="console-btn flex items-center justify-between gap-2 px-2.5 py-1.5 rounded text-xs"
                 >
-                  <span className="flex items-center gap-1.5 text-slate-200 truncate">
+                  <span className="flex items-center gap-2 text-slate-200 truncate">
                     <span className="w-3 h-3 rounded-sm shrink-0 border border-black/30" style={{ backgroundColor: ct.hex }} />
                     <span className="truncate">{ct.label}</span>
                   </span>

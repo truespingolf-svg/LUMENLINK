@@ -6,13 +6,21 @@
     --font-display: 'Barlow Condensed', sans-serif;
     --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
     --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+    --surface-canvas: #07090d;
+    --surface-panel: #0f131b;
+    --surface-elevated: #141924;
+    --surface-well: #06080c;
+    --border-hairline: #1e2533;
+    --border-strong: #2c3547;
+    --accent-amber: #f59e0b;
   }
 
   body {
     font-family: var(--font-sans);
-    background-color: #0b0d10;
-    color: #e6eaf0;
+    background-color: var(--surface-canvas);
+    color: #e6eaf2;
     overflow-x: hidden;
+    letter-spacing: 0.005em;
   }
 }
 
@@ -25,59 +33,97 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Tactile Pro Lighting Console Surfaces & Hardware Keycaps */
+/* Precision Stagecraft Studio Surfaces (Single-Elevation, Crisp Hairlines) */
 .console-panel {
-  background: linear-gradient(180deg, #151922 0%, #10131A 100%);
-  border: 1px solid #262E3D;
+  background: linear-gradient(180deg, #121620 0%, #0d1018 100%);
+  border: 1px solid #202736;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.045),
-    0 8px 24px rgba(0, 0, 0, 0.45);
+    0 10px 28px rgba(0, 0, 0, 0.42);
 }
 
 .console-well {
-  background: linear-gradient(180deg, #07090D 0%, #0B0E14 100%);
-  border: 1px solid #202735;
-  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.75);
+  background: #06080c;
+  border: 1px solid #1b212e;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.72);
 }
 
-.console-btn {
-  background: linear-gradient(180deg, #242B37 0%, #171C24 55%, #12161D 100%);
-  border: 1px solid #2F3848;
+/* Authentic Anodized Hardware Console Chassis */
+.desk-chassis {
+  background:
+    radial-gradient(ellipse 90% 45% at 50% 0%, rgba(245, 158, 11, 0.055), transparent 65%),
+    linear-gradient(180deg, #151923 0%, #0d1017 45%, #090b10 100%);
+  border: 1px solid #283142;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.09),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.45),
-    0 2px 4px rgba(0, 0, 0, 0.5);
-  transition: transform 80ms ease, filter 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.7),
+    0 24px 60px rgba(0, 0, 0, 0.72);
+}
+
+.desk-tft-bezel {
+  background: linear-gradient(180deg, #090b10 0%, #050609 100%);
+  border: 1px solid #2a3344;
+  box-shadow:
+    inset 0 2px 12px rgba(0, 0, 0, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 4px 16px rgba(0, 0, 0, 0.55);
+}
+
+.desk-surface-deck {
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.012) 0px,
+      rgba(255, 255, 255, 0.012) 1px,
+      transparent 1px,
+      transparent 3px
+    ),
+    linear-gradient(180deg, #131720 0%, #0b0e14 100%);
+  border-top: 1px solid #2b3446;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.desk-strip-well {
+  background: linear-gradient(180deg, #0c0f15 0%, #080a0e 100%);
+  border: 1px solid #1e2533;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+
+/* Tactile Keycaps */
+.console-btn {
+  background: linear-gradient(180deg, #1d2330 0%, #141923 100%);
+  border: 1px solid #293244;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 1px 3px rgba(0, 0, 0, 0.45);
+  transition: transform 90ms cubic-bezier(0.16, 1, 0.3, 1), border-color 140ms ease, background 140ms ease, color 140ms ease;
 }
 
 .console-btn:hover:not(:disabled) {
-  background: linear-gradient(180deg, #2B3342 0%, #1C222C 55%, #151A22 100%);
-  border-color: #46536A;
+  background: linear-gradient(180deg, #252c3b 0%, #19202c 100%);
+  border-color: #3d4a63;
 }
 
 .console-btn:active:not(:disabled) {
   transform: translateY(1px);
-  box-shadow:
-    inset 0 2px 4px rgba(0, 0, 0, 0.65),
-    0 1px 1px rgba(0, 0, 0, 0.4);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.65);
 }
 
 .console-btn-amber {
-  background: linear-gradient(180deg, #FBBF24 0%, #F59E0B 52%, #D97706 100%);
-  border: 1px solid #FCD34D;
-  color: #0B0D10;
+  background: linear-gradient(180deg, #fbbf24 0%, #f59e0b 60%, #d97706 100%);
+  border: 1px solid #fcd34d;
+  color: #090b0e;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.45),
-    inset 0 -1px 0 rgba(120, 53, 15, 0.4),
-    0 2px 8px rgba(245, 158, 11, 0.28);
-  transition: transform 80ms ease, filter 120ms ease, box-shadow 120ms ease;
+    0 2px 10px rgba(245, 158, 11, 0.25);
+  transition: transform 90ms cubic-bezier(0.16, 1, 0.3, 1), filter 140ms ease, box-shadow 140ms ease;
 }
 
 .console-btn-amber:hover:not(:disabled) {
   filter: brightness(1.06);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.55),
-    0 3px 12px rgba(245, 158, 11, 0.4);
+    0 3px 14px rgba(245, 158, 11, 0.35);
 }
 
 .console-btn-amber:active:not(:disabled) {
@@ -86,30 +132,30 @@
 }
 
 .console-btn-danger {
-  background: linear-gradient(180deg, #EF4444 0%, #DC2626 55%, #991B1B 100%);
-  border: 1px solid #F87171;
-  color: #FFFFFF;
+  background: linear-gradient(180deg, #ef4444 0%, #dc2626 60%, #991b1b 100%);
+  border: 1px solid #f87171;
+  color: #ffffff;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    0 0 14px rgba(239, 68, 68, 0.45);
+    0 0 14px rgba(239, 68, 68, 0.4);
 }
 
 .console-btn-emerald {
-  background: linear-gradient(180deg, #10B981 0%, #059669 55%, #047857 100%);
-  border: 1px solid #34D399;
-  color: #FFFFFF;
+  background: linear-gradient(180deg, #10b981 0%, #059669 60%, #047857 100%);
+  border: 1px solid #34d399;
+  color: #ffffff;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    0 0 10px rgba(16, 185, 129, 0.32);
+    0 0 12px rgba(16, 185, 129, 0.32);
 }
 
 .console-btn-sky {
-  background: linear-gradient(180deg, #0EA5E9 0%, #0284C7 55%, #0369A1 100%);
-  border: 1px solid #38BDF8;
-  color: #FFFFFF;
+  background: linear-gradient(180deg, #0ea5e9 0%, #0284c7 60%, #0369a1 100%);
+  border: 1px solid #38bdf8;
+  color: #ffffff;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    0 0 10px rgba(14, 165, 233, 0.32);
+    0 0 12px rgba(14, 165, 233, 0.32);
 }
 
 /* Realistic Hardware Fader / Range Sliders */
@@ -127,29 +173,29 @@ input[type='range']:focus {
 }
 
 input[type='range']::-webkit-slider-runnable-track {
-  height: 8px;
+  height: 7px;
   border-radius: 9999px;
-  background: var(--slider-track-bg, linear-gradient(180deg, #06080B 0%, #10141C 100%));
-  border: 1px solid #2A3242;
+  background: var(--slider-track-bg, linear-gradient(180deg, #05070a 0%, #0f131b 100%));
+  border: 1px solid #242c3b;
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.85);
 }
 
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 18px;
-  height: 20px;
+  width: 16px;
+  height: 19px;
   margin-top: -7px;
   border-radius: 3px;
   background: linear-gradient(
     180deg,
-    #64748B 0%,
-    #334155 18%,
-    #1E2532 50%,
-    #334155 82%,
-    #0F172A 100%
+    #64748b 0%,
+    #334155 20%,
+    #1c2330 50%,
+    #334155 80%,
+    #0f172a 100%
   );
-  border: 1px solid #94A3B8;
+  border: 1px solid #94a3b8;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.45),
     inset 0 0 0 1px rgba(15, 23, 42, 0.6),
@@ -159,7 +205,7 @@ input[type='range']::-webkit-slider-thumb {
 
 input[type='range']:hover::-webkit-slider-thumb,
 input[type='range']:focus-visible::-webkit-slider-thumb {
-  border-color: #FBBF24;
+  border-color: #fbbf24;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.55),
     0 0 8px rgba(245, 158, 11, 0.45),
@@ -167,26 +213,26 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
 }
 
 input[type='range']::-moz-range-track {
-  height: 8px;
+  height: 7px;
   border-radius: 9999px;
-  background: var(--slider-track-bg, linear-gradient(180deg, #06080B 0%, #10141C 100%));
-  border: 1px solid #2A3242;
+  background: var(--slider-track-bg, linear-gradient(180deg, #05070a 0%, #0f131b 100%));
+  border: 1px solid #242c3b;
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.85);
 }
 
 input[type='range']::-moz-range-thumb {
-  width: 18px;
-  height: 20px;
+  width: 16px;
+  height: 19px;
   border-radius: 3px;
   background: linear-gradient(
     180deg,
-    #64748B 0%,
-    #334155 18%,
-    #1E2532 50%,
-    #334155 82%,
-    #0F172A 100%
+    #64748b 0%,
+    #334155 20%,
+    #1c2330 50%,
+    #334155 80%,
+    #0f172a 100%
   );
-  border: 1px solid #94A3B8;
+  border: 1px solid #94a3b8;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.45),
     0 2px 5px rgba(0, 0, 0, 0.8);
@@ -199,16 +245,16 @@ input[type='range']::-moz-range-thumb {
 }
 
 ::-webkit-scrollbar-track {
-  background: #0d1015;
+  background: #0a0d12;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #272d38;
+  background: #232a38;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a4252;
+  background: #364156;
 }
 
 /* Print styles for QR Poster Studio */

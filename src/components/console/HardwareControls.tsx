@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { EyeOff, Pause, Power, ShieldAlert, Sparkles, Square } from 'lucide-react';
+import { EyeOff, Pause, Power, ShieldAlert, Square } from 'lucide-react';
 import { LiveLightingState } from '../../shared/types';
 
 interface VerticalFaderProps {
@@ -320,81 +320,61 @@ interface SafetyBarProps {
 
 export const SafetyBar: React.FC<SafetyBarProps> = ({ lighting, onCommand }) => {
   return (
-    <div className="flex flex-wrap items-center gap-2 console-panel px-2.5 py-1.5 rounded-md">
+    <div className="flex flex-wrap items-center gap-1.5">
       <button
         type="button"
         onClick={() => onCommand('set_blackout', { blackout: !lighting.blackout })}
-        className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold whitespace-nowrap ${
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold whitespace-nowrap ${
           lighting.blackout
             ? 'console-btn-danger'
             : 'console-btn text-red-400 hover:border-red-500/60'
         }`}
       >
-        <span
-          className={`w-1.5 h-1.5 rounded-full ${
-            lighting.blackout ? 'bg-white shadow-[0_0_6px_#fff]' : 'bg-red-500/70'
-          }`}
-        />
         <Power className="w-3.5 h-3.5" />
-        <span>{lighting.blackout ? 'BLACKOUT ACTIVE' : 'Blackout'}</span>
+        <span>{lighting.blackout ? 'BLACKOUT ON' : 'Blackout'}</span>
       </button>
 
       <button
         type="button"
         onClick={() => onCommand('set_freeze', { freeze: !lighting.freeze })}
-        className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap ${
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap ${
           lighting.freeze ? 'console-btn-sky font-semibold' : 'console-btn text-slate-200'
         }`}
       >
-        <span
-          className={`w-1.5 h-1.5 rounded-full ${
-            lighting.freeze ? 'bg-white shadow-[0_0_6px_#fff]' : 'bg-slate-600'
-          }`}
-        />
         <Pause className="w-3.5 h-3.5" />
-        <span>{lighting.freeze ? 'Frozen' : 'Freeze Output'}</span>
+        <span>{lighting.freeze ? 'Frozen' : 'Freeze'}</span>
       </button>
 
       <button
         type="button"
         onClick={() => onCommand('set_emergency_neutral', { emergencyNeutral: !lighting.emergencyNeutral })}
-        className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium whitespace-nowrap ${
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium whitespace-nowrap ${
           lighting.emergencyNeutral
             ? 'console-btn-amber font-semibold'
             : 'console-btn text-amber-300'
         }`}
       >
-        <span
-          className={`w-1.5 h-1.5 rounded-full ${
-            lighting.emergencyNeutral ? 'bg-slate-950' : 'bg-amber-400/70'
-          }`}
-        />
         <ShieldAlert className="w-3.5 h-3.5" />
-        <span>{lighting.emergencyNeutral ? 'Neutral On' : 'Emergency Neutral'}</span>
+        <span>{lighting.emergencyNeutral ? 'Neutral On' : 'Neutral'}</span>
       </button>
 
       <button
         type="button"
         onClick={() => onCommand('stop_all_effects')}
-        className="console-btn flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-slate-200 whitespace-nowrap"
+        className="console-btn flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium text-slate-200 whitespace-nowrap"
       >
         <Square className="w-3.5 h-3.5" />
-        <span>Stop Effects</span>
+        <span>Stop FX</span>
       </button>
 
       <button
         type="button"
         onClick={() => onCommand('release_all')}
-        className="console-btn flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium text-slate-200 whitespace-nowrap"
+        className="console-btn flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium text-slate-200 whitespace-nowrap"
       >
         <EyeOff className="w-3.5 h-3.5" />
-        <span>Release All</span>
+        <span>Release</span>
       </button>
-
-      <div className="ml-auto flex items-center gap-1.5 text-xs text-slate-300 font-mono-tabular console-well px-2.5 py-1 rounded">
-        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-        <span>Master: {lighting.masterIntensity}%</span>
-      </div>
     </div>
   );
 };

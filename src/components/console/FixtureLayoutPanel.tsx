@@ -80,7 +80,7 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
       {/* Top Row: Virtual Audience Pixel Mapping Canvas + Group Manager */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
         {/* Interactive Spatial Pixel Map */}
-        <div className="xl:col-span-8 bg-[#12151B] border border-[#232934] rounded p-3 flex flex-col gap-3">
+        <div className="xl:col-span-8 console-panel rounded-md p-3.5 flex flex-col gap-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Move className="w-4 h-4 text-amber-400" />
@@ -99,13 +99,13 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
                   max={16}
                   value={gridCols}
                   onChange={(e) => setGridCols(Math.max(1, Number(e.target.value)))}
-                  className="w-14 bg-[#090B0E] border border-[#2A313E] rounded px-1.5 py-1 font-mono-tabular text-slate-100"
+                  className="w-14 console-well rounded px-1.5 py-1 font-mono-tabular text-slate-100"
                 />
               </label>
               <button
                 type="button"
                 onClick={() => onCommand('bulk_update_devices', { autoGrid: true, cols: gridCols })}
-                className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#1A1F28] border border-[#2B3342] text-slate-200 hover:bg-[#232A36]"
+                className="console-btn flex items-center gap-1 px-2.5 py-1 rounded text-slate-200"
               >
                 <Grid className="w-3.5 h-3.5" />
                 <span>Auto-Grid</span>
@@ -117,7 +117,7 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
                 placeholder="Layout name..."
                 value={presetName}
                 onChange={(e) => setPresetName(e.target.value)}
-                className="w-28 bg-[#090B0E] border border-[#2A313E] rounded px-2 py-1 text-xs text-slate-100"
+                className="w-28 console-well rounded px-2 py-1 text-xs text-slate-100"
               />
               <button
                 type="button"
@@ -129,7 +129,7 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
                   });
                   setPresetName('');
                 }}
-                className="flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500 text-slate-950 font-semibold hover:bg-amber-400"
+                className="console-btn-amber flex items-center gap-1 px-2.5 py-1 rounded font-semibold"
               >
                 <Save className="w-3.5 h-3.5" />
                 <span>Save Layout</span>
@@ -140,7 +140,7 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
                 onChange={(e) => {
                   if (e.target.value) onCommand('apply_layout_preset', { presetId: e.target.value });
                 }}
-                className="bg-[#090B0E] border border-[#2A313E] rounded px-2 py-1 text-slate-200"
+                className="console-well rounded px-2 py-1 text-slate-200"
               >
                 <option value="">Load Layout...</option>
                 {show.layoutPresets.map((p) => (
@@ -152,8 +152,8 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
             </div>
           </div>
 
-          <div className="bg-[#080A0D] border border-[#232934] rounded overflow-hidden select-none">
-            <div className="px-3 py-1 bg-[#12161E] border-b border-[#232934] text-center text-[10px] font-mono-tabular tracking-widest text-slate-400 uppercase">
+          <div className="console-well rounded overflow-hidden select-none">
+            <div className="px-3 py-1 bg-[#0C1018] border-b border-[#1E2534] text-center text-[10px] font-mono-tabular tracking-widest text-slate-400 uppercase">
               STAGE / FRONT OF HOUSE
             </div>
             <div
@@ -230,7 +230,7 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
         </div>
 
         {/* Group Manager */}
-        <div className="xl:col-span-4 bg-[#12151B] border border-[#232934] rounded p-3 flex flex-col gap-3">
+        <div className="xl:col-span-4 console-panel rounded-md p-3.5 flex flex-col gap-3">
           <h3 className="font-display text-sm font-semibold tracking-wider uppercase text-slate-100">
             Audience Groups &amp; Sections
           </h3>
@@ -249,7 +249,7 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
               placeholder="New group name..."
               value={newGroupName}
               onChange={(e) => setNewGroupName(e.target.value)}
-              className="flex-1 min-w-0 bg-[#090B0E] border border-[#2A313E] rounded px-2.5 py-1.5 text-xs text-slate-100"
+              className="flex-1 min-w-0 console-well rounded px-2.5 py-1.5 text-xs text-slate-100"
             />
             <button
               type="button"
@@ -258,7 +258,7 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
                 onCommand('create_group', { name: newGroupName.trim(), color: newGroupColor });
                 setNewGroupName('');
               }}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold bg-amber-500 text-slate-950 hover:bg-amber-400 shrink-0 whitespace-nowrap"
+              className="console-btn-amber flex items-center gap-1 px-2.5 py-1.5 rounded text-xs font-semibold shrink-0 whitespace-nowrap"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add</span>
@@ -271,7 +271,7 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
               return (
                 <div
                   key={grp.id}
-                  className="bg-[#0D1015] border border-[#232934] rounded p-2.5 space-y-2"
+                  className="console-well rounded p-2.5 space-y-2"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -328,7 +328,7 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
       </div>
 
       {/* Bottom Row: Complete Fixture Patch & Device Management Table */}
-      <div className="bg-[#12151B] border border-[#232934] rounded p-3">
+      <div className="console-panel rounded-md p-3.5">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div className="flex items-center gap-3">
             <h3 className="font-display text-sm font-semibold tracking-wider uppercase text-slate-100">
@@ -343,7 +343,7 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
             <button
               type="button"
               onClick={selectAll}
-              className="px-2.5 py-1 rounded bg-[#1A1F28] border border-[#2B3342] text-slate-200 hover:bg-[#232A36]"
+              className="console-btn px-2.5 py-1 rounded text-slate-200"
             >
               {selectedDeviceIds.length === devices.length && devices.length > 0 ? 'Deselect All' : 'Select All'}
             </button>
@@ -360,7 +360,7 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
                   });
                 }
               }}
-              className="bg-[#090B0E] border border-[#2A313E] rounded px-2 py-1 text-slate-200 disabled:opacity-40"
+              className="console-well rounded px-2 py-1 text-slate-200 disabled:opacity-40"
             >
               <option value="">Assign Selected to Group...</option>
               {show.groups.map((g) => (
@@ -374,7 +374,7 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
               type="button"
               disabled={selectedDeviceIds.length === 0}
               onClick={() => onCommand('identify_devices', { deviceIds: selectedDeviceIds })}
-              className="flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500 text-slate-950 font-semibold disabled:opacity-40"
+              className="console-btn-amber flex items-center gap-1 px-2.5 py-1 rounded font-semibold disabled:opacity-40"
             >
               <Zap className="w-3.5 h-3.5" />
               <span>Identify Flash</span>
@@ -386,7 +386,7 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
               onClick={() =>
                 onCommand('bulk_update_devices', { deviceIds: selectedDeviceIds, excluded: true })
               }
-              className="px-2.5 py-1 rounded bg-[#1A1F28] border border-[#2B3342] text-slate-200 disabled:opacity-40"
+              className="console-btn px-2.5 py-1 rounded text-slate-200 disabled:opacity-40"
             >
               Exclude FX
             </button>
@@ -397,7 +397,7 @@ export const FixtureLayoutPanel: React.FC<FixtureLayoutPanelProps> = ({
               onClick={() =>
                 onCommand('bulk_update_devices', { deviceIds: selectedDeviceIds, excluded: false })
               }
-              className="px-2.5 py-1 rounded bg-[#1A1F28] border border-[#2B3342] text-slate-200 disabled:opacity-40"
+              className="console-btn px-2.5 py-1 rounded text-slate-200 disabled:opacity-40"
             >
               Include FX
             </button>
